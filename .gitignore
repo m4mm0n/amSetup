@@ -5,12 +5,14 @@ artifacts/
 Ready2Release/
 publish/
 dist/
+release/
 
 # Installer packages and generated setup files
 *.ampkg
 *.ampkg.*
 *.nupkg
 *.snupkg
+*.zip
 
 # Local builder projects and payloads
 amsetup.json
