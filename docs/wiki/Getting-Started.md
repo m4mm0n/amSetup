@@ -20,3 +20,10 @@ Basic flow:
 4. Run dependency analysis.
 5. Preview the installer.
 6. Build the setup executable.
+
+Windows production installers open a traditional wizard on double-click. Use
+`install --silent` for automation or `install --console` when you explicitly
+want the terminal installer flow.
+
+Installs create `.amsetup/install.json` and an uninstaller script in the install
+folder. Run `uninstall --target <install-folder>` for automated removal.

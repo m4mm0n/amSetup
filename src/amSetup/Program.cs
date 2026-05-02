@@ -22,7 +22,7 @@ internal static class Program
         {
             var attached = PackageStore.TryOpenAttached(Environment.ProcessPath, out var package);
             if (!attached) attached = PackageStore.TryOpenExternal(Environment.ProcessPath, out package);
-            if (attached && (args.Length == 0 || IsInstallCommand(args[0])))
+            if (attached && args.Length == 0)
                 return Installer.Run(package!, args.Length > 0 ? args[1..] : args);
 
             if (args.Length == 0) return SetupBuilderUi.Run(args);
@@ -35,7 +35,9 @@ internal static class Program
                 "builder" => SetupBuilderUi.Run(args[1..]),
                 "pack" => Pack(args[1..]),
                 "install" => attached ? Installer.Run(package!, args[1..]) : throw new InvalidOperationException("This executable has no attached or adjacent amSetup package."),
+                "uninstall" => Uninstaller.Run(args[1..]),
                 "inspect" => attached ? Inspector.Run(package!) : throw new InvalidOperationException("This executable has no attached or adjacent amSetup package."),
+                _ when attached && IsInstallCommand(args[0]) => Installer.Run(package!, args),
                 "help" or "--help" or "-h" => Help(),
                 _ => Help()
             };
@@ -51,6 +53,8 @@ internal static class Program
         arg.Equals("install", StringComparison.OrdinalIgnoreCase) ||
         arg.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
         arg.Equals("--target", StringComparison.OrdinalIgnoreCase) ||
+        arg.Equals("--components", StringComparison.OrdinalIgnoreCase) ||
+        arg.Equals("--console", StringComparison.OrdinalIgnoreCase) ||
         arg.Equals("--dry-run", StringComparison.OrdinalIgnoreCase) ||
         arg.Equals("--list", StringComparison.OrdinalIgnoreCase);
 
@@ -176,7 +180,8 @@ internal static class Program
         Console.WriteLine("  build-project --project amsetup.project.json [--allow-framework-dependent-stub]");
         Console.WriteLine("  builder [--project amsetup.project.json] [--port 41873] [--no-browser]");
         Console.WriteLine("  pack --manifest amsetup.json --payload <dir> --output <installer> [--stub <exe>] [--compression fastest|balanced|smallest|store] [--layout embedded|external|split] [--chunk-size 512m]");
-        Console.WriteLine("  install [--target <dir>] [--components a,b] [--silent] [--dry-run] [--list]");
+        Console.WriteLine("  install [--target <dir>] [--components a,b] [--silent] [--dry-run] [--list] [--console]");
+        Console.WriteLine("  uninstall --target <dir> [--silent] [--dry-run]");
         Console.WriteLine("  inspect");
         return 0;
     }
@@ -405,9 +410,13 @@ internal sealed record PackageInfo(
     CompressionModeName Compression,
     List<PackageFile> Files,
     long UncompressedBytes,
-    long CompressedBytes);
+    long CompressedBytes,
+    List<InstalledArtifact>? Artifacts = null);
 
 internal sealed record PackageFile(string Path, long Length, string Sha256, string ComponentId);
+
+internal sealed record InstalledArtifact(string Kind, string Path, string Root = "", string Key = "", string Name = "");
+internal sealed record InstallOptions(List<SetupShortcut>? Shortcuts = null);
 
 internal static class PackageStore
 {
@@ -502,16 +511,22 @@ internal static class PackageStore
         return Compress(raw.ToArray(), compression);
     }
 
-    public static PackageArchive ReadPackage(AttachedPackage package)
+    public static PackageArchive ReadPackage(AttachedPackage package, Action<PackageLoadProgress>? progress = null)
     {
         byte[] compressed;
         if (package.IsExternal)
         {
             using var output = new MemoryStream();
+            long done = 0;
+            long total = package.PayloadLength;
             foreach (string part in package.ExternalParts)
             {
                 using var input = File.OpenRead(part);
-                input.CopyTo(output);
+                CopyWithProgress(input, output, b =>
+                {
+                    done += b;
+                    progress?.Invoke(new PackageLoadProgress("Loading package archives", done, total));
+                });
             }
             compressed = output.ToArray();
         }
@@ -520,10 +535,18 @@ internal static class PackageStore
             compressed = new byte[package.PayloadLength];
             using var file = File.OpenRead(package.ExecutablePath);
             file.Position = package.PayloadOffset;
-            file.ReadExactly(compressed);
+            int offset = 0;
+            while (offset < compressed.Length)
+            {
+                int read = file.Read(compressed, offset, Math.Min(1024 * 1024, compressed.Length - offset));
+                if (read <= 0) throw new EndOfStreamException();
+                offset += read;
+                progress?.Invoke(new PackageLoadProgress("Loading embedded package", offset, compressed.Length));
+            }
         }
 
-        var (raw, compression) = Decompress(compressed);
+        var (raw, compression) = Decompress(compressed, progress);
+        progress?.Invoke(new PackageLoadProgress("Reading package manifest", 95, 100));
         using var stream = new MemoryStream(raw);
         Span<byte> magic = stackalloc byte[PackageMagic.Length];
         stream.ReadExactly(magic);
@@ -554,7 +577,19 @@ internal static class PackageStore
             entries.Add(new PackageEntry(path, offset, length, Convert.ToHexString(sha).ToLowerInvariant(), componentId));
         }
 
+        progress?.Invoke(new PackageLoadProgress("Package ready", 100, 100));
         return new PackageArchive(manifest, raw, entries, compressed.Length, compression);
+    }
+
+    private static void CopyWithProgress(Stream input, Stream output, Action<int> copied)
+    {
+        byte[] buffer = new byte[1024 * 1024];
+        int read;
+        while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            output.Write(buffer, 0, read);
+            copied(read);
+        }
     }
 
     private static void WriteJson<T>(Stream stream, T value)
@@ -593,18 +628,27 @@ internal static class PackageStore
         return output.ToArray();
     }
 
-    private static (byte[] Raw, CompressionModeName Mode) Decompress(byte[] data)
+    private static (byte[] Raw, CompressionModeName Mode) Decompress(byte[] data, Action<PackageLoadProgress>? progress = null)
     {
         if (data.Length == 0) throw new InvalidDataException("Empty package.");
         var mode = (CompressionModeName)data[0];
         if (mode == CompressionModeName.Store)
+        {
+            progress?.Invoke(new PackageLoadProgress("Preparing stored package", 100, 100));
             return (data[1..], mode);
+        }
         if (Enum.IsDefined(mode) && mode != CompressionModeName.Store)
         {
             using var input = new MemoryStream(data, 1, data.Length - 1);
             using var brotli = new BrotliStream(input, CompressionMode.Decompress);
             using var output = new MemoryStream();
-            brotli.CopyTo(output);
+            byte[] buffer = new byte[1024 * 1024];
+            int read;
+            while ((read = brotli.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                output.Write(buffer, 0, read);
+                progress?.Invoke(new PackageLoadProgress("Unpacking package to memory", input.Position, input.Length));
+            }
             return (output.ToArray(), mode);
         }
         throw new InvalidDataException("Unknown amSetup compression mode.");
@@ -648,6 +692,7 @@ internal sealed record AttachedPackage(string ExecutablePath, long PayloadOffset
 
 internal sealed record PackageEntry(string Path, long Offset, long Length, string Sha256, string ComponentId);
 internal sealed record PackageArchive(SetupManifest Manifest, byte[] Raw, List<PackageEntry> Entries, long CompressedBytes, CompressionModeName Compression);
+internal sealed record PackageLoadProgress(string Stage, long Done, long Total);
 
 internal static class PackageBuilder
 {
@@ -703,11 +748,14 @@ internal static class Installer
         bool silent = args.Contains("--silent", StringComparer.OrdinalIgnoreCase);
         bool dryRun = args.Contains("--dry-run", StringComparer.OrdinalIgnoreCase);
         bool list = args.Contains("--list", StringComparer.OrdinalIgnoreCase);
+        bool forceConsole = args.Contains("--console", StringComparer.OrdinalIgnoreCase);
         string? target = ValueAfter(args, "--target");
         string? componentArg = ValueAfter(args, "--components");
 
+        if (!forceConsole && !silent && !dryRun && !list && InstallerGui.TryRun(attached, target, componentArg, out int guiExitCode))
+            return guiExitCode;
+
         var archive = PackageStore.ReadPackage(attached);
-        var ui = new InstallerUi(archive.Manifest.Theme);
         if (list)
         {
             foreach (var entry in archive.Entries) Console.WriteLine($"{entry.Length,10}  {entry.Path}");
@@ -715,6 +763,7 @@ internal static class Installer
         }
 
         target ??= PathTemplate.Expand(archive.Manifest.DefaultInstallDirectory, archive.Manifest);
+        var ui = new ConsoleInstallerUi(archive.Manifest.Theme);
         if (!silent) InstallerSplash.Show(archive.Manifest);
         var window = archive.Manifest.Window ?? new SetupWindow();
         string title = ExpandWindowText(string.IsNullOrWhiteSpace(window.Title) ? "{ProductName} {Version}" : window.Title, archive.Manifest, target);
@@ -744,28 +793,11 @@ internal static class Installer
         }
 
         var selectedComponents = ResolveComponents(archive.Manifest, componentArg, silent);
-        var selectedEntries = archive.Entries
-            .Where(e => selectedComponents.Contains(e.ComponentId, StringComparer.OrdinalIgnoreCase))
-            .ToList();
-
-        if (dryRun)
-        {
-            Console.WriteLine("Dry run complete. No files were written.");
-            Console.WriteLine($"Selected files: {selectedEntries.Count}");
-            return 0;
-        }
-
-        ExtractArchive(archive, selectedEntries, target, ui);
-        CreateInstallDirectories(archive.Manifest, target, ui);
-        RunPrerequisites(archive.Manifest, target, silent, ui);
-        WriteInstallReceipt(archive, target);
-        InstallShortcuts(archive.Manifest, target, ui);
-        ApplyEnvironmentVariables(archive.Manifest, target, ui);
-        if (OperatingSystem.IsWindows()) ApplyRegistryValues(archive.Manifest, target, ui);
-        RunPostInstall(archive.Manifest, target, silent);
+        int result = InstallSelected(archive, target, selectedComponents, dryRun, silent, ui);
+        if (dryRun) return result;
         WriteOptionalLine(ExpandWindowText(window.FooterText, archive.Manifest, target), ui);
         Console.WriteLine("Install complete.");
-        return 0;
+        return result;
     }
 
     private static void TrySetConsoleTitle(string title)
@@ -779,7 +811,7 @@ internal static class Installer
         }
     }
 
-    private static void WriteOptionalLine(string text, InstallerUi? ui = null)
+    private static void WriteOptionalLine(string text, IInstallerUi? ui = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
         if (ui is not null)
@@ -791,7 +823,7 @@ internal static class Installer
         Console.WriteLine(text);
     }
 
-    private static string ExpandWindowText(string template, SetupManifest manifest, string? target = null)
+    internal static string ExpandWindowText(string template, SetupManifest manifest, string? target = null)
     {
         string result = template
             .Replace("{ProductName}", manifest.ProductName, StringComparison.OrdinalIgnoreCase)
@@ -802,12 +834,17 @@ internal static class Installer
         return Environment.ExpandEnvironmentVariables(result);
     }
 
-    private static HashSet<string> ResolveComponents(SetupManifest manifest, string? componentArg, bool silent)
+    internal static List<SetupComponent> ComponentsForDisplay(SetupManifest manifest)
     {
         var manifestComponents = manifest.Components ?? [];
-        var components = manifestComponents.Count == 0
-            ? [new SetupComponent { Id = "main", Name = "Main Files", Required = true, DefaultSelected = true, Include = ["**"] }]
+        return manifestComponents.Count == 0
+            ? [new SetupComponent { Id = "main", Name = "Main Files", Description = "Required application files", Required = true, DefaultSelected = true, Include = ["**"] }]
             : manifestComponents;
+    }
+
+    internal static HashSet<string> ResolveComponents(SetupManifest manifest, string? componentArg, bool silent)
+    {
+        var components = ComponentsForDisplay(manifest);
 
         if (!string.IsNullOrWhiteSpace(componentArg))
         {
@@ -840,7 +877,33 @@ internal static class Installer
         return selected;
     }
 
-    private static void ExtractArchive(PackageArchive archive, List<PackageEntry> entries, string target, InstallerUi ui)
+    internal static int InstallSelected(PackageArchive archive, string target, HashSet<string> selectedComponents, bool dryRun, bool silent, IInstallerUi ui, InstallOptions? options = null)
+    {
+        var selectedEntries = archive.Entries
+            .Where(e => selectedComponents.Contains(e.ComponentId, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        if (dryRun)
+        {
+            ui.Line("Dry run complete. No files were written.");
+            ui.Line($"Selected files: {selectedEntries.Count}");
+            return 0;
+        }
+
+        var artifacts = new List<InstalledArtifact>();
+        ExtractArchive(archive, selectedEntries, target, ui, artifacts);
+        CreateInstallDirectories(archive.Manifest, target, ui, artifacts);
+        RunPrerequisites(archive.Manifest, target, silent, ui);
+        InstallShortcuts(archive.Manifest, target, ui, artifacts, options?.Shortcuts);
+        ApplyEnvironmentVariables(archive.Manifest, target, ui);
+        if (OperatingSystem.IsWindows()) ApplyRegistryValues(archive.Manifest, target, ui, artifacts);
+        RunPostInstall(archive.Manifest, target, silent, ui);
+        WriteUninstaller(archive.Manifest, target, ui, artifacts);
+        WriteInstallReceipt(archive, target, artifacts);
+        return 0;
+    }
+
+    private static void ExtractArchive(PackageArchive archive, List<PackageEntry> entries, string target, IInstallerUi ui, List<InstalledArtifact> artifacts)
     {
         string fullTarget = Path.GetFullPath(target);
         Directory.CreateDirectory(fullTarget);
@@ -856,14 +919,25 @@ internal static class Installer
             if (!hash.Equals(entry.Sha256, StringComparison.Ordinal))
                 throw new InvalidDataException($"Hash mismatch before extracting {entry.Path}.");
             using var file = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            file.Write(content);
-            done += entry.Length;
-            ui.Progress(++index, entries.Count, done, total, entry.Path);
+            const int chunkSize = 1024 * 1024;
+            long entryDone = 0;
+            for (int offset = 0; offset < content.Length; offset += chunkSize)
+            {
+                int length = Math.Min(chunkSize, content.Length - offset);
+                file.Write(content.Slice(offset, length));
+                entryDone += length;
+                done += length;
+                ui.Progress(index + 1, entries.Count, done, total, entry.Path, entryDone, entry.Length);
+            }
+            if (entry.Length == 0)
+                ui.Progress(index + 1, entries.Count, done, total, entry.Path, 0, 0);
+            index++;
+            artifacts.Add(new InstalledArtifact("file", outputPath));
         }
         ui.ProgressClear();
     }
 
-    private static string SafeCombine(string root, string relativePath)
+    internal static string SafeCombine(string root, string relativePath)
     {
         if (Path.IsPathRooted(relativePath))
             throw new InvalidDataException($"Unsafe package path: {relativePath}");
@@ -877,7 +951,7 @@ internal static class Installer
         return path;
     }
 
-    private static void WriteInstallReceipt(PackageArchive archive, string target)
+    private static void WriteInstallReceipt(PackageArchive archive, string target, List<InstalledArtifact> artifacts)
     {
         string meta = Path.Combine(target, ".amsetup");
         Directory.CreateDirectory(meta);
@@ -890,12 +964,13 @@ internal static class Installer
             archive.Compression,
             archive.Entries.Select(e => new PackageFile(e.Path, e.Length, e.Sha256, e.ComponentId)).ToList(),
             archive.Entries.Sum(e => e.Length),
-            archive.CompressedBytes);
+            archive.CompressedBytes,
+            artifacts);
         string json = JsonSerializer.Serialize(info, AmSetupJsonContext.Default.PackageInfo);
         File.WriteAllText(Path.Combine(meta, "install.json"), json + Environment.NewLine, Encoding.UTF8);
     }
 
-    private static void CreateInstallDirectories(SetupManifest manifest, string target, InstallerUi ui)
+    private static void CreateInstallDirectories(SetupManifest manifest, string target, IInstallerUi ui, List<InstalledArtifact> artifacts)
     {
         string fullTarget = Path.GetFullPath(target);
         foreach (var directory in manifest.InstallDirectories ?? [])
@@ -906,6 +981,7 @@ internal static class Installer
                 ? SafeCombineOrRoot(fullTarget, expanded)
                 : SafeCombine(fullTarget, expanded);
             Directory.CreateDirectory(output);
+            artifacts.Add(new InstalledArtifact("directory", output));
             ui.Line($"Folder: {output}");
         }
     }
@@ -921,7 +997,7 @@ internal static class Installer
         return fullPath;
     }
 
-    private static void RunPostInstall(SetupManifest manifest, string target, bool silent)
+    private static void RunPostInstall(SetupManifest manifest, string target, bool silent, IInstallerUi ui)
     {
         foreach (var action in manifest.PostInstall ?? [])
         {
@@ -935,11 +1011,11 @@ internal static class Installer
             process?.WaitForExit();
             if (process is not null && process.ExitCode != 0 && !action.IgnoreFailure)
                 throw new InvalidOperationException($"Post-install action failed: {command} {arguments}");
-            if (!silent) Console.WriteLine($"Post-install: {command} {arguments}");
+            if (!silent) ui.Line($"Post-install: {command} {arguments}");
         }
     }
 
-    private static void RunPrerequisites(SetupManifest manifest, string target, bool silent, InstallerUi ui)
+    private static void RunPrerequisites(SetupManifest manifest, string target, bool silent, IInstallerUi ui)
     {
         foreach (var prerequisite in (manifest.Prerequisites ?? []).Where(p => p.Required))
         {
@@ -980,9 +1056,53 @@ internal static class Installer
         return Path.IsPathRooted(expanded) ? expanded : Path.Combine(target, expanded);
     }
 
-    private static void InstallShortcuts(SetupManifest manifest, string target, InstallerUi ui)
+    internal static List<SetupShortcut> ShortcutChoices(PackageArchive archive)
     {
-        foreach (var shortcut in manifest.Shortcuts ?? [])
+        var existing = (archive.Manifest.Shortcuts ?? [])
+            .Where(s => PlatformDefaults.Matches(s.OS) && !string.IsNullOrWhiteSpace(s.Target))
+            .ToList();
+        var primary = existing.FirstOrDefault() ?? DetectPrimaryShortcut(archive);
+        if (primary is null) return existing;
+
+        var choices = new List<SetupShortcut>();
+        AddChoice("desktop");
+        if (OperatingSystem.IsWindows()) AddChoice("startMenu");
+        else if (!OperatingSystem.IsMacOS()) AddChoice("applications");
+        AddChoice("install");
+        return choices;
+
+        void AddChoice(string location)
+        {
+            var shortcut = existing.FirstOrDefault(s => s.Location.Equals(location, StringComparison.OrdinalIgnoreCase)) ??
+                primary with { Location = location };
+            if (!choices.Any(s => s.Location.Equals(shortcut.Location, StringComparison.OrdinalIgnoreCase)))
+                choices.Add(shortcut);
+        }
+    }
+
+    private static SetupShortcut? DetectPrimaryShortcut(PackageArchive archive)
+    {
+        var candidate = archive.Entries.FirstOrDefault(e =>
+            e.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+            e.Path.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
+            e.Path.EndsWith(".bat", StringComparison.OrdinalIgnoreCase) ||
+            e.Path.EndsWith(".sh", StringComparison.OrdinalIgnoreCase));
+        if (candidate is null) return null;
+
+        return new SetupShortcut
+        {
+            OS = "any",
+            Name = archive.Manifest.ProductName,
+            Target = "{InstallDir}" + Path.DirectorySeparatorChar + candidate.Path.Replace('/', Path.DirectorySeparatorChar),
+            Location = OperatingSystem.IsWindows() ? "startMenu" : "applications",
+            WorkingDirectory = "{InstallDir}"
+        };
+    }
+
+    private static void InstallShortcuts(SetupManifest manifest, string target, IInstallerUi ui, List<InstalledArtifact> artifacts, List<SetupShortcut>? selectedShortcuts)
+    {
+        var shortcuts = selectedShortcuts ?? manifest.Shortcuts ?? [];
+        foreach (var shortcut in shortcuts)
         {
             if (!PlatformDefaults.Matches(shortcut.OS)) continue;
             string name = string.IsNullOrWhiteSpace(shortcut.Name) ? manifest.ProductName : shortcut.Name;
@@ -999,6 +1119,7 @@ internal static class Installer
             {
                 string path = Path.Combine(location, PathTemplate.SanitizeSegment(name) + ".cmd");
                 File.WriteAllText(path, $"@echo off\r\ncd /d \"{workingDirectory}\"\r\n\"{command}\" {args}\r\n", Encoding.UTF8);
+                artifacts.Add(new InstalledArtifact("shortcut", path));
                 ui.Line($"Shortcut: {path}");
             }
             else
@@ -1014,12 +1135,13 @@ internal static class Installer
                     Categories=Utility;
                     """, Encoding.UTF8);
                 TrySetExecutable(path);
+                artifacts.Add(new InstalledArtifact("shortcut", path));
                 ui.Line($"Shortcut: {path}");
             }
         }
     }
 
-    private static void ApplyEnvironmentVariables(SetupManifest manifest, string target, InstallerUi ui)
+    private static void ApplyEnvironmentVariables(SetupManifest manifest, string target, IInstallerUi ui)
     {
         foreach (var variable in manifest.EnvironmentVariables ?? [])
         {
@@ -1044,7 +1166,7 @@ internal static class Installer
     }
 
     [SupportedOSPlatform("windows")]
-    private static void ApplyRegistryValues(SetupManifest manifest, string target, InstallerUi ui)
+    private static void ApplyRegistryValues(SetupManifest manifest, string target, IInstallerUi ui, List<InstalledArtifact> artifacts)
     {
         if (!OperatingSystem.IsWindows()) return;
 
@@ -1058,6 +1180,7 @@ internal static class Installer
                     ?? throw new InvalidOperationException("Could not create registry key.");
                 object data = RegistryData(PathTemplate.Expand(value.Value, manifest, target), value.ValueKind);
                 key.SetValue(value.Name, data, RegistryKind(value.ValueKind));
+                artifacts.Add(new InstalledArtifact("registry", "", value.Root, PathTemplate.Expand(value.Key, manifest, target), value.Name));
                 ui.Line($"Registry: {value.Root}\\{value.Key}");
             }
             catch when (value.IgnoreFailure)
@@ -1108,6 +1231,60 @@ internal static class Installer
         catch { }
     }
 
+    private static void WriteUninstaller(SetupManifest manifest, string target, IInstallerUi ui, List<InstalledArtifact> artifacts)
+    {
+        string meta = Path.Combine(target, ".amsetup");
+        Directory.CreateDirectory(meta);
+        string uninstallerName = OperatingSystem.IsWindows() ? "uninstall.exe" : "uninstall";
+        string uninstallerPath = Path.Combine(meta, uninstallerName);
+        string? processPath = Environment.ProcessPath;
+        if (!string.IsNullOrWhiteSpace(processPath) && File.Exists(processPath))
+        {
+            try
+            {
+                File.Copy(processPath, uninstallerPath, overwrite: true);
+                CopyUninstallerSidecars(processPath, meta);
+                if (!OperatingSystem.IsWindows()) TrySetExecutable(uninstallerPath);
+                artifacts.Add(new InstalledArtifact("uninstaller", uninstallerPath));
+            }
+            catch
+            {
+                // Some development apphost layouts cannot be copied as standalone uninstallers.
+                // The receipt and uninstall scripts still allow command-line uninstalling.
+            }
+        }
+
+        string displayName = PathTemplate.SanitizeSegment("Uninstall " + manifest.ProductName);
+        if (OperatingSystem.IsWindows())
+        {
+            string rootScript = Path.Combine(target, displayName + ".cmd");
+            string command = File.Exists(uninstallerPath) ? uninstallerPath : processPath ?? "amSetup.exe";
+            File.WriteAllText(rootScript, $"@echo off\r\n\"{command}\" uninstall --target \"{target}\"\r\n", Encoding.UTF8);
+            artifacts.Add(new InstalledArtifact("uninstaller", rootScript));
+            ui.Line($"Uninstaller: {rootScript}");
+        }
+        else
+        {
+            string rootScript = Path.Combine(target, displayName + ".sh");
+            string command = File.Exists(uninstallerPath) ? uninstallerPath : processPath ?? "amSetup";
+            File.WriteAllText(rootScript, $"#!/usr/bin/env sh\n\"{command}\" uninstall --target \"{target}\"\n", Encoding.UTF8);
+            TrySetExecutable(rootScript);
+            artifacts.Add(new InstalledArtifact("uninstaller", rootScript));
+            ui.Line($"Uninstaller: {rootScript}");
+        }
+    }
+
+    private static void CopyUninstallerSidecars(string processPath, string meta)
+    {
+        string directory = Path.GetDirectoryName(Path.GetFullPath(processPath)) ?? ".";
+        foreach (string sidecar in Directory.EnumerateFiles(directory, "amSetup.*"))
+        {
+            string name = Path.GetFileName(sidecar);
+            if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+            File.Copy(sidecar, Path.Combine(meta, name), overwrite: true);
+        }
+    }
+
     private static string? ValueAfter(string[] args, string name)
     {
         for (int i = 0; i < args.Length - 1; i++)
@@ -1129,6 +1306,179 @@ internal static class Inspector
         Console.WriteLine($"Package:    {archive.CompressedBytes:N0} bytes");
         Console.WriteLine($"Compression:{archive.Compression}");
         return 0;
+    }
+}
+
+internal static class Uninstaller
+{
+    public static int Run(string[] args)
+    {
+        bool silent = args.Contains("--silent", StringComparer.OrdinalIgnoreCase);
+        bool dryRun = args.Contains("--dry-run", StringComparer.OrdinalIgnoreCase);
+        string target = ValueAfter(args, "--target") ?? ResolveTargetFromProcess();
+        if (string.IsNullOrWhiteSpace(target)) throw new ArgumentException("Missing --target <dir>.");
+
+        string fullTarget = Path.GetFullPath(target);
+        string receiptPath = Path.Combine(fullTarget, ".amsetup", "install.json");
+        if (!File.Exists(receiptPath)) throw new FileNotFoundException("Install receipt was not found.", receiptPath);
+
+        var receipt = JsonSerializer.Deserialize(File.ReadAllText(receiptPath, Encoding.UTF8), AmSetupJsonContext.Default.PackageInfo)
+            ?? throw new InvalidDataException("Install receipt could not be read.");
+        var ui = new ConsoleInstallerUi(receipt.Manifest.Theme);
+        ui.Header($"Uninstall {receipt.Manifest.ProductName}");
+
+        var artifacts = receipt.Artifacts ?? [];
+        var fileArtifacts = artifacts
+            .Where(a => a.Kind.Equals("file", StringComparison.OrdinalIgnoreCase) ||
+                        a.Kind.Equals("shortcut", StringComparison.OrdinalIgnoreCase) ||
+                        a.Kind.Equals("uninstaller", StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.Path)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToList();
+
+        if (fileArtifacts.Count == 0)
+            fileArtifacts = receipt.Files.Select(f => Installer.SafeCombine(fullTarget, f.Path)).ToList();
+
+        string? currentProcess = Environment.ProcessPath is { Length: > 0 } p ? Path.GetFullPath(p) : null;
+        int total = Math.Max(fileArtifacts.Count, 1);
+        int index = 0;
+        foreach (string path in fileArtifacts.OrderByDescending(p => p.Length))
+        {
+            string fullPath = RequireInsideTarget(fullTarget, path);
+            index++;
+            if (!dryRun && File.Exists(fullPath) && !IsSamePath(fullPath, currentProcess))
+                File.Delete(fullPath);
+            ui.Progress(index, total, index, total, fullPath, 1, 1);
+        }
+        ui.ProgressClear();
+
+        foreach (var artifact in artifacts.Where(a => a.Kind.Equals("registry", StringComparison.OrdinalIgnoreCase)))
+            RemoveRegistryValue(artifact, ui, dryRun);
+
+        var directories = artifacts
+            .Where(a => a.Kind.Equals("directory", StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.Path)
+            .Concat(Directory.Exists(fullTarget) ? Directory.EnumerateDirectories(fullTarget, "*", SearchOption.AllDirectories) : [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(p => p.Length);
+        foreach (string directory in directories)
+        {
+            string fullDirectory = RequireInsideTarget(fullTarget, directory);
+            if (!dryRun && Directory.Exists(fullDirectory) && !Directory.EnumerateFileSystemEntries(fullDirectory).Any())
+                Directory.Delete(fullDirectory);
+        }
+
+        if (!dryRun)
+        {
+            TryDelete(receiptPath);
+            TryDeleteEmpty(Path.Combine(fullTarget, ".amsetup"));
+            TryDeleteEmpty(fullTarget);
+            ScheduleSelfCleanup(fullTarget, currentProcess);
+        }
+
+        if (!silent) ui.Line(dryRun ? "Dry-run uninstall complete." : "Uninstall complete.");
+        return 0;
+    }
+
+    private static string? ValueAfter(string[] args, string name)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+            if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase))
+                return args[i + 1];
+        return null;
+    }
+
+    private static string ResolveTargetFromProcess()
+    {
+        string? processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath)) return "";
+        string directory = Path.GetDirectoryName(Path.GetFullPath(processPath)) ?? "";
+        if (Path.GetFileName(directory).Equals(".amsetup", StringComparison.OrdinalIgnoreCase))
+            return Path.GetDirectoryName(directory) ?? "";
+        return directory;
+    }
+
+    private static string RequireInsideTarget(string target, string path)
+    {
+        string fullTarget = Path.GetFullPath(target);
+        string fullPath = Path.GetFullPath(path);
+        string relative = Path.GetRelativePath(fullTarget, fullPath);
+        if (relative == "." || relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            throw new InvalidDataException($"Refusing to uninstall outside target: {path}");
+        return fullPath;
+    }
+
+    private static bool IsSamePath(string left, string? right) =>
+        !string.IsNullOrWhiteSpace(right) &&
+        Path.GetFullPath(left).Equals(Path.GetFullPath(right), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    private static void RemoveRegistryValue(InstalledArtifact artifact, IInstallerUi ui, bool dryRun)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            if (!dryRun)
+            {
+                var root = RegistryRoot(artifact.Root);
+                using var key = root.OpenSubKey(artifact.Key, writable: true);
+                key?.DeleteValue(artifact.Name, throwOnMissingValue: false);
+            }
+            ui.Line($"Registry removed: {artifact.Root}\\{artifact.Key}");
+        }
+        catch
+        {
+            ui.Line($"Registry removal skipped: {artifact.Root}\\{artifact.Key}");
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static Microsoft.Win32.RegistryKey RegistryRoot(string root) => root.ToUpperInvariant() switch
+    {
+        "HKLM" or "HKEY_LOCAL_MACHINE" => Microsoft.Win32.Registry.LocalMachine,
+        "HKCR" or "HKEY_CLASSES_ROOT" => Microsoft.Win32.Registry.ClassesRoot,
+        "HKU" or "HKEY_USERS" => Microsoft.Win32.Registry.Users,
+        "HKCC" or "HKEY_CURRENT_CONFIG" => Microsoft.Win32.Registry.CurrentConfig,
+        _ => Microsoft.Win32.Registry.CurrentUser
+    };
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch { }
+    }
+
+    private static void TryDeleteEmpty(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
+                Directory.Delete(path);
+        }
+        catch { }
+    }
+
+    private static void ScheduleSelfCleanup(string target, string? currentProcess)
+    {
+        if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(currentProcess)) return;
+        string meta = Path.Combine(Path.GetFullPath(target), ".amsetup");
+        if (!Path.GetFullPath(currentProcess).StartsWith(Path.GetFullPath(meta), StringComparison.OrdinalIgnoreCase)) return;
+
+        string script = Path.Combine(Path.GetTempPath(), "amsetup-uninstall-cleanup-" + Guid.NewGuid().ToString("N") + ".cmd");
+        File.WriteAllText(script, $"""
+            @echo off
+            timeout /t 2 /nobreak >nul
+            rmdir /s /q "{meta}" 2>nul
+            rmdir "{Path.GetFullPath(target)}" 2>nul
+            del /f /q "%~f0" 2>nul
+            """, Encoding.UTF8);
+        try
+        {
+            Process.Start(new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"") { CreateNoWindow = true, UseShellExecute = false });
+        }
+        catch { }
     }
 }
 
@@ -1217,11 +1567,19 @@ internal static class ComponentMatcher
     }
 }
 
-internal sealed class InstallerUi
+internal interface IInstallerUi
+{
+    void Header(string text);
+    void Line(string text);
+    void Progress(int index, int count, long bytes, long total, string current, long currentBytes = 0, long currentTotal = 0);
+    void ProgressClear();
+}
+
+internal sealed class ConsoleInstallerUi : IInstallerUi
 {
     private readonly SetupTheme _theme;
 
-    public InstallerUi(SetupTheme theme) => _theme = theme;
+    public ConsoleInstallerUi(SetupTheme theme) => _theme = theme;
 
     public void Header(string text)
     {
@@ -1237,13 +1595,14 @@ internal sealed class InstallerUi
         Console.ResetColor();
     }
 
-    public void Progress(int index, int count, long bytes, long total, string current)
+    public void Progress(int index, int count, long bytes, long total, string current, long currentBytes = 0, long currentTotal = 0)
     {
         int percent = total <= 0 ? 100 : (int)Math.Clamp(bytes * 100 / total, 0, 100);
         int width = 28;
         int filled = percent * width / 100;
         Console.ForegroundColor = Color(_theme.ProgressColor, ConsoleColor.Green);
-        Console.Write($"\r[{new string('#', filled).PadRight(width, '.')}] {percent,3}% {index}/{count} {Trim(current, 42)}   ");
+        int filePercent = currentTotal <= 0 ? 100 : (int)Math.Clamp(currentBytes * 100 / currentTotal, 0, 100);
+        Console.Write($"\r[{new string('#', filled).PadRight(width, '.')}] {percent,3}% file {filePercent,3}% {index}/{count} {Trim(current, 36)}   ");
         Console.ResetColor();
     }
 
@@ -1291,6 +1650,7 @@ internal static class SizeParser
 [JsonSerializable(typeof(SetupWindow))]
 [JsonSerializable(typeof(PackageInfo))]
 [JsonSerializable(typeof(PackageFile))]
+[JsonSerializable(typeof(InstalledArtifact))]
 [JsonSerializable(typeof(SetupBuilderProject))]
 [JsonSerializable(typeof(BuilderState))]
 [JsonSerializable(typeof(BuilderSaveRequest))]

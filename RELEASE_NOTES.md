@@ -1,18 +1,21 @@
-# amSetup 0.1.0
+# amSetup 0.2.0.0
 
-Initial source release of amSetup.
+This release turns the generated Windows installer into a traditional setup
+wizard and adds uninstall support.
 
 Highlights:
 
-- Cross-platform C# installer builder and installer runtime.
-- Local browser-based builder UI for creating setup projects.
+- Traditional Windows setup wizard for generated production installers, with
+  welcome, license, destination, component, shortcut, install progress, and
+  finish pages.
+- Theme palettes for blue, dark, amber, and oldschool installers.
+- Package-loading progress plus separate overall/current-file install progress.
+- Receipt-based uninstaller generation.
+- Interactive shortcut tasks for desktop, Start Menu/applications menu, and
+  install-folder launchers.
+- Sample GUI setup installers under `artifacts/sample-setup` when built locally.
 - Embedded, adjacent, and split package layouts.
 - Brotli compression with speed/size options.
-- Installer components, shortcuts, install folders, environment variables,
-  registry edits, prerequisite checks, and post-install actions.
-- Branding with setup icon and optional launch splash.
-- Installer preview and small window designer.
-- Dependency analyzer for .NET and native payloads.
 
 The generated release assets contain self-contained stubs for Windows, Linux,
 and macOS. Use the matching stub for the OS and architecture you are packaging

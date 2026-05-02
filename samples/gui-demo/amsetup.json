@@ -1,0 +1,113 @@
+{
+  "productName": "amSetup GUI Demo",
+  "identifier": "amsetup-gui-demo",
+  "version": "1.0.0",
+  "publisher": "ZLS",
+  "description": "Sample package for previewing the amSetup installer wizard.",
+  "defaultInstallDirectory": "{LocalAppData}\\Programs\\amSetup GUI Demo",
+  "licenseText": "amSetup GUI Demo\n\nThis sample package exists only to preview the installer wizard. It installs a tiny demo payload, creates runtime folders, and writes a local launcher shortcut inside the selected install folder.",
+  "requireConfirmation": true,
+  "branding": {
+    "iconPath": "..\\..\\assets\\amsetup.ico",
+    "splashPath": "..\\..\\assets\\amsetup-oldschool-icon-256.png",
+    "showSplash": true,
+    "splashDurationMilliseconds": 900,
+    "splashImageBase64": "",
+    "splashContentType": ""
+  },
+  "theme": {
+    "accentColor": "blue",
+    "headerColor": "white",
+    "progressColor": "green",
+    "banner": "classic"
+  },
+  "window": {
+    "title": "{ProductName} Setup",
+    "subtitle": "Install {ProductName} {Version}",
+    "introText": "This setup wizard shows the traditional amSetup installer UI: destination folder selection, license page, component choices, progress, and finish screen.",
+    "footerText": "{ProductName} has finished.",
+    "style": "classic",
+    "width": 760,
+    "height": 500,
+    "showSidebar": true
+  },
+  "components": [
+    {
+      "id": "main",
+      "name": "Demo Application",
+      "description": "Required launcher and application files",
+      "required": true,
+      "defaultSelected": true,
+      "include": [
+        "SampleApp.cmd",
+        "app/**"
+      ]
+    },
+    {
+      "id": "docs",
+      "name": "Documentation",
+      "description": "Optional README and notes",
+      "required": false,
+      "defaultSelected": true,
+      "include": [
+        "docs/**"
+      ]
+    },
+    {
+      "id": "extras",
+      "name": "Example Extras",
+      "description": "Optional plugin and content folders",
+      "required": false,
+      "defaultSelected": false,
+      "include": [
+        "plugins/**",
+        "content/**"
+      ]
+    }
+  ],
+  "installDirectories": [
+    {
+      "os": "any",
+      "path": "data"
+    },
+    {
+      "os": "any",
+      "path": "logs"
+    },
+    {
+      "os": "any",
+      "path": "config"
+    }
+  ],
+  "shortcuts": [
+    {
+      "os": "windows",
+      "name": "Launch amSetup GUI Demo",
+      "target": "{InstallDir}\\SampleApp.cmd",
+      "arguments": "",
+      "location": "install",
+      "workingDirectory": "{InstallDir}"
+    }
+  ],
+  "environmentVariables": [
+    {
+      "os": "any",
+      "name": "AMSETUP_GUI_DEMO_HOME",
+      "value": "{InstallDir}",
+      "target": "process"
+    }
+  ],
+  "registryValues": [
+    {
+      "os": "windows",
+      "root": "HKCU",
+      "key": "Software\\amSetup\\GuiDemo",
+      "name": "InstallDir",
+      "value": "{InstallDir}",
+      "valueKind": "String",
+      "ignoreFailure": true
+    }
+  ],
+  "prerequisites": [],
+  "postInstall": []
+}

@@ -12,7 +12,11 @@ dotnet run --no-build --project .\tests\amSetup.Validation\amSetup.Validation.cs
 dotnet format .\amSetup.slnx --verify-no-changes --no-restore
 ```
 
-The validation project creates a split-archive installer, installs only the selected component into a temporary target directory, verifies extracted file contents, verifies shortcut creation, checks the install receipt, runs `inspect` plus `install --list`, runs the dependency analyzer, builds through an `amsetup.project.json`, and smoke-tests the builder UI HTTP endpoints.
+The validation project creates a split-archive installer, installs only the selected component into a temporary target directory, verifies extracted file contents, verifies shortcut and uninstaller creation, checks the install receipt, runs uninstall, runs `inspect` plus `install --list`, runs the dependency analyzer, builds through an `amsetup.project.json`, and smoke-tests the builder UI HTTP endpoints. Also compile the Windows wizard target before release:
+
+```powershell
+dotnet build .\src\amSetup\amSetup.csproj -c Release -warnaserror -p:UseWindowsGui=true
+```
 
 ## Builder Workflow
 
@@ -56,13 +60,13 @@ For local validation only, `build-project` accepts `--allow-framework-dependent-
 
 Installer stubs should be published per target runtime identifier. The pack command rejects normal framework-dependent apphost builds unless the hidden validation-only `--allow-framework-dependent-stub` flag is used.
 
-Small NativeAOT stubs:
+Small NativeAOT stubs for non-Windows targets, plus Windows GUI wizard stubs:
 
 ```powershell
 .\build-stubs.ps1
 ```
 
-Fallback single-file stubs when NativeAOT toolchains are unavailable:
+Fallback single-file stubs when NativeAOT toolchains are unavailable. Windows stubs always use the GUI wizard build because Windows Forms is the traditional installer surface:
 
 ```powershell
 .\build-stubs.ps1 -NoAot
@@ -118,14 +122,18 @@ Compression modes:
 ```powershell
 .\MySetup.exe install
 .\MySetup.exe install --target "C:\Tools\MyApp" --components main,docs --silent
+.\MySetup.exe install --console
 .\MySetup.exe install --dry-run
 .\MySetup.exe install --list
+.\MySetup.exe uninstall --target "C:\Tools\MyApp"
 .\MySetup.exe inspect
 ```
 
 ## Supported Runtimes
 
-The same C# installer runtime supports Windows, Linux, and macOS. Native execution still requires one produced stub per OS/architecture:
+Windows production stubs open a traditional setup wizard when run interactively. The wizard lets users choose components plus desktop, Start Menu/applications menu, and install-folder shortcuts. It also shows package-loading progress before large installers open, then separate overall and current-file progress bars during extraction. Silent installs, uninstall, dry-runs, listing, inspection, and `install --console` remain command-line flows.
+
+The same C# installer engine supports Windows, Linux, and macOS. Native execution still requires one produced stub per OS/architecture:
 
 - `win-x64`
 - `win-arm64`

@@ -1,0 +1,9 @@
+{
+  "manifestPath": "amsetup.json",
+  "payloadPath": "sample-payload",
+  "outputPath": "..\\..\\artifacts\\sample-setup\\amSetupGuiDemoSetup.exe",
+  "stubPath": "..\\..\\artifacts\\stubs\\win-x64\\amSetup.exe",
+  "compression": "Balanced",
+  "layout": "Embedded",
+  "chunkSize": "512m"
+}

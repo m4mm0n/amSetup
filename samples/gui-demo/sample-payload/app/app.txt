@@ -1,0 +1,3 @@
+This is the required demo application payload.
+
+It gives the installer something real to extract while you preview the wizard.

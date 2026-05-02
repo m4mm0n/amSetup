@@ -9,6 +9,8 @@
 
 - Builds installer executables from a payload directory and JSON manifest.
 - Includes a guided browser-based setup-builder UI for product details, payload selection, branding, dependency analysis, and builds.
+- Produces Windows installer stubs that open as a traditional setup wizard on double-click, with welcome, license, destination, component, shortcut, install progress, and finish pages.
+- Shows package-loading progress before large installers open and uses separate overall/current-file progress bars while installing.
 - Includes a dependency analyzer for publish/payload folders so missing `.deps.json` assets, runtime configs, .NET/.NET Framework prerequisites, native libraries, symbols, and large split-worthy files are visible before packaging.
 - Includes an oldschool default setup icon and manifest-controlled custom setup icon/splash branding.
 - Supports selected install folders, interactive confirmation, silent install, dry-run, package inspection, and file listing.
@@ -16,11 +18,13 @@
 - Uses built-in Brotli compression: `fastest`, `balanced`, `smallest`, or `store`.
 - Supports install components with required/default selection.
 - Creates platform-aware shortcuts for Windows, Linux, and macOS.
+- Lets interactive users choose desktop, Start Menu/applications menu, and install-folder shortcut tasks.
 - Applies process/user environment variables.
 - Runs OS-filtered post-install actions.
 - Writes install metadata to `.amsetup/install.json`.
+- Creates a receipt-based uninstaller under `.amsetup` plus a launch script in the install folder.
 - Verifies every extracted file with SHA-256 and blocks unsafe package paths.
-- Provides console UI theming for header, accent, progress color, and banner style.
+- Provides installer wizard theming for header, accent, progress color, banner style, splash, and sidebar/window settings.
 - Provides a small installer window designer for setup title, subtitle, intro text, footer text, size, style, and sidebar preview.
 - Has no third-party runtime dependencies.
 
@@ -84,7 +88,8 @@ analyze --payload <dir> [--manifest amsetup.json] [--output report.json] [--writ
 build-project --project amsetup.project.json [--allow-framework-dependent-stub]
 builder [--project amsetup.project.json] [--port 41873] [--no-browser]
 pack --manifest amsetup.json --payload <dir> --output <installer> [--stub <exe>] [--compression fastest|balanced|smallest|store] [--layout embedded|external|split] [--chunk-size 512m]
-install [--target <dir>] [--components a,b] [--silent] [--dry-run] [--list]
+install [--target <dir>] [--components a,b] [--silent] [--dry-run] [--list] [--console]
+uninstall --target <dir> [--silent] [--dry-run]
 inspect
 ```
 
@@ -101,7 +106,7 @@ The UI supports:
 - installer look preview before building
 - installer window designer for title, subtitle, intro text, footer text, style, dimensions, and sidebar preview
 - normal product fields without editing JSON first
-- theme presets plus custom console colors
+- theme presets plus custom installer colors
 - extra install-directory folders for app data, config, plugins, logs, or other runtime-relative content
 - built-in oldschool setup icon selection
 - custom `.ico` setup icon path
@@ -339,7 +344,7 @@ For .NET applications, a self-contained publish avoids requiring the user's mach
 
 ## Runtime Behavior
 
-An installer with an attached or adjacent package defaults to install mode. These are equivalent:
+An installer with an attached or adjacent package defaults to install mode. On Windows production stubs, both commands open the traditional setup wizard:
 
 ```powershell
 .\MySetup.exe
@@ -350,10 +355,14 @@ Useful runtime commands:
 
 ```powershell
 .\MySetup.exe install --target "C:\Tools\MyApp" --components main,docs --silent
+.\MySetup.exe install --console
 .\MySetup.exe install --dry-run
 .\MySetup.exe install --list
+.\MySetup.exe uninstall --target "C:\Tools\MyApp"
 .\MySetup.exe inspect
 ```
+
+Install writes `.amsetup\install.json` plus an uninstaller executable/script. The uninstaller removes installed files, installer-created shortcuts, empty install folders, and best-effort registry values recorded in the receipt.
 
 ## Platform Model
 

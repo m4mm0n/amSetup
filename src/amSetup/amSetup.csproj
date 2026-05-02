@@ -2,7 +2,10 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <OutputType Condition="'$(UseWindowsGui)' == 'true'">WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework Condition="'$(UseWindowsGui)' == 'true'">net10.0-windows</TargetFramework>
+    <UseWindowsForms Condition="'$(UseWindowsGui)' == 'true'">true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <InvariantGlobalization>true</InvariantGlobalization>

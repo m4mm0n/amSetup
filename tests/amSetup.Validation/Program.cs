@@ -178,6 +178,13 @@ internal static class Program
                 throw new InvalidOperationException("Install directories were not created.");
             if (!File.Exists(Path.Combine(install, ".amsetup", "install.json")))
                 throw new InvalidOperationException("Install receipt was not written.");
+            if (!File.Exists(Path.Combine(install, ".amsetup", OperatingSystem.IsWindows() ? "uninstall.exe" : "uninstall")) &&
+                !File.Exists(Path.Combine(install, $"Uninstall Validation App{(OperatingSystem.IsWindows() ? ".cmd" : ".sh")}")))
+                throw new InvalidOperationException("Uninstaller was not created.");
+
+            Run(installer, $"uninstall --target \"{install}\" --silent");
+            if (File.Exists(Path.Combine(install, "app.txt")) || File.Exists(Path.Combine(install, ".amsetup", "install.json")))
+                throw new InvalidOperationException("Uninstall did not remove installed files and receipt.");
 
             Console.WriteLine("amSetup validation passed.");
             return 0;

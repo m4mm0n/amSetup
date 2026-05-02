@@ -11,19 +11,24 @@ $project = Join-Path $PSScriptRoot "src/amSetup/amSetup.csproj"
 
 foreach ($rid in $Rids) {
     $out = Join-Path $PSScriptRoot "artifacts/stubs/$rid"
+    $isWindowsRid = $rid.StartsWith("win-", [System.StringComparison]::OrdinalIgnoreCase)
     $iconArgs = @()
     if (-not [string]::IsNullOrWhiteSpace($IconPath)) {
         $iconArgs += "-p:ApplicationIcon=$IconPath"
     }
+    $guiArgs = @()
+    if ($isWindowsRid) {
+        $guiArgs += "-p:UseWindowsGui=true"
+    }
 
-    if ($NoAot) {
+    if ($NoAot -or $isWindowsRid) {
         dotnet publish $project -c Release -r $rid --self-contained true `
             -p:PublishSingleFile=true `
-            -p:PublishTrimmed=true `
             -p:EnableCompressionInSingleFile=true `
             -p:DebugType=None `
             -p:DebugSymbols=false `
             -o $out `
+            @guiArgs `
             @iconArgs
     }
     else {
@@ -34,6 +39,7 @@ foreach ($rid in $Rids) {
             -p:DebugType=None `
             -p:DebugSymbols=false `
             -o $out `
+            @guiArgs `
             @iconArgs
     }
 

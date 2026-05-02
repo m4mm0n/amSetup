@@ -25,6 +25,7 @@ jobs:
       - name: Validate
         run: |
           dotnet build .\amSetup.slnx -c Release -warnaserror
+          dotnet build .\src\amSetup\amSetup.csproj -c Release -warnaserror -p:UseWindowsGui=true
           dotnet run --no-build --project .\tests\amSetup.Validation\amSetup.Validation.csproj -c Release
           dotnet format .\amSetup.slnx --verify-no-changes --no-restore
 

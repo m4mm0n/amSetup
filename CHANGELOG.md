@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0.0 - 2026-05-02
+
+- Added a traditional Windows installer wizard with package-loading progress,
+  welcome, license, destination, component, shortcut, install progress, and
+  finish pages.
+- Added installer theme palettes for blue, dark, amber, and oldschool styles,
+  with builder preset wiring and themed previews.
+- Added separate overall and current-file progress bars during extraction.
+- Added receipt-based uninstall generation with `.amsetup\uninstall.exe` and an
+  install-folder uninstall script.
+- Added interactive shortcut tasks for Desktop, Start Menu/applications menu,
+  and install-folder launchers.
+- Added sample GUI setup projects and rebuilt sample installers.
+- Updated CI/release validation to compile the Windows wizard target.
+
 ## 0.1.0 - 2026-05-02
 
 Initial public source release.
