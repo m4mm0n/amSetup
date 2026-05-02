@@ -224,8 +224,11 @@ internal static class Program
                 !html.Contains("Theme preset", StringComparison.Ordinal) ||
                 !html.Contains("Install Folders", StringComparison.Ordinal) ||
                 !html.Contains("Registry", StringComparison.Ordinal) ||
+                !html.Contains("setupClient", StringComparison.Ordinal) ||
+                !html.Contains("previewPage", StringComparison.Ordinal) ||
+                !html.Contains("resolveRuntimePalette", StringComparison.Ordinal) ||
                 !html.Contains("Browse", StringComparison.Ordinal))
-                throw new InvalidOperationException("Builder UI is missing guided preview/theme/folder/browse/registry controls.");
+                throw new InvalidOperationException("Builder UI is missing guided runtime preview/theme/folder/browse/registry controls.");
 
             string state = RetryGet(client, baseUrl + "/api/state?project=" + Uri.EscapeDataString(project));
             if (!state.Contains("\"payloadPath\"", StringComparison.Ordinal))

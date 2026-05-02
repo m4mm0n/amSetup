@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.3.0 - 2026-05-03
+
+- Rebuilt the setup-builder web preview to mirror the generated Windows
+  installer wizard instead of showing a generic card mockup.
+- The preview now uses the same runtime palette rules, sidebar width, glossy
+  buttons, bottom button bar, page titles, page subtitles, and dual progress
+  bars as the final installer UI.
+- Added a preview page selector for Welcome, License, Options, Installing, and
+  Complete pages.
+
 ## 0.2.2.0 - 2026-05-02
 
 - The package-loading taskbar window is now themed instead of using the default
