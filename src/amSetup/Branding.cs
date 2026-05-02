@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 using System.Reflection;
 
 namespace AmSetup;
