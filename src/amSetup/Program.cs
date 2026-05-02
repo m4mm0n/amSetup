@@ -249,9 +249,9 @@ internal sealed record SetupManifest
             ProductName = productName,
             Identifier = identifier,
             Version = "1.0.0",
-            Publisher = "Unknown",
+            Publisher = "Your Company",
             Description = "amSetup package",
-            DefaultInstallDirectory = PlatformDefaults.InstallDirectoryTemplate(identifier, productName),
+            DefaultInstallDirectory = PlatformDefaults.InstallDirectoryTemplate("Your Company", identifier, productName),
             LicenseText = "Replace this text with your license. Leave empty to skip.",
             RequireConfirmation = true,
             Branding = new SetupBranding
@@ -298,12 +298,17 @@ internal sealed record SetupManifest
     {
         string product = string.IsNullOrWhiteSpace(ProductName) ? "Application" : ProductName.Trim();
         string id = string.IsNullOrWhiteSpace(Identifier) ? product.ToLowerInvariant().Replace(' ', '-') : Identifier.Trim();
-        string dir = string.IsNullOrWhiteSpace(DefaultInstallDirectory)
-            ? PlatformDefaults.InstallDirectoryTemplate(id, product)
+        string publisher = string.IsNullOrWhiteSpace(Publisher) ? "Your Company" : Publisher.Trim();
+        string dir = string.IsNullOrWhiteSpace(DefaultInstallDirectory) || IsLegacyPerUserInstallDirectory(DefaultInstallDirectory)
+            ? PlatformDefaults.InstallDirectoryTemplate(publisher, id, product)
             : DefaultInstallDirectory;
 
-        return this with { ProductName = product, Identifier = id, DefaultInstallDirectory = dir };
+        return this with { ProductName = product, Identifier = id, Publisher = publisher, DefaultInstallDirectory = dir };
     }
+
+    private static bool IsLegacyPerUserInstallDirectory(string value) =>
+        value.Equals("{LocalAppData}\\Programs\\{ProductName}", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("{LocalAppData}/Programs/{ProductName}", StringComparison.OrdinalIgnoreCase);
 }
 
 internal sealed record SetupAction
@@ -780,10 +785,11 @@ internal static class Installer
             string? selectedTarget = Console.ReadLine();
             if (!string.IsNullOrWhiteSpace(selectedTarget)) target = selectedTarget.Trim();
 
-            if (!string.IsNullOrWhiteSpace(archive.Manifest.LicenseText))
+            string? licenseText = LicenseTextProcessor.PrepareForPackage(archive.Manifest);
+            if (!string.IsNullOrWhiteSpace(licenseText))
             {
                 Console.WriteLine();
-                Console.WriteLine(archive.Manifest.LicenseText);
+                Console.WriteLine(licenseText);
             }
 
             Console.Write("Install? [Y/n] ");
@@ -1484,9 +1490,9 @@ internal static class Uninstaller
 
 internal static class PlatformDefaults
 {
-    public static string InstallDirectoryTemplate(string identifier, string productName)
+    public static string InstallDirectoryTemplate(string publisher, string identifier, string productName)
     {
-        if (OperatingSystem.IsWindows()) return "{LocalAppData}\\Programs\\{ProductName}";
+        if (OperatingSystem.IsWindows()) return "{ProgramFiles}\\{Publisher}\\{ProductName}";
         if (OperatingSystem.IsMacOS()) return "{Home}/Applications/{ProductName}";
         return "{Home}/.local/share/{Identifier}";
     }
@@ -1523,6 +1529,7 @@ internal static class PathTemplate
         string result = template
             .Replace("{ProductName}", SanitizeSegment(manifest.ProductName), StringComparison.OrdinalIgnoreCase)
             .Replace("{Identifier}", SanitizeSegment(manifest.Identifier), StringComparison.OrdinalIgnoreCase)
+            .Replace("{Publisher}", SanitizeSegment(manifest.Publisher), StringComparison.OrdinalIgnoreCase)
             .Replace("{Version}", manifest.Version, StringComparison.OrdinalIgnoreCase)
             .Replace("{Home}", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), StringComparison.OrdinalIgnoreCase)
             .Replace("{LocalAppData}", Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), StringComparison.OrdinalIgnoreCase)
@@ -1537,6 +1544,86 @@ internal static class PathTemplate
         foreach (char c in Path.GetInvalidFileNameChars()) value = value.Replace(c, '-');
         return value.Trim();
     }
+}
+
+internal static class LicenseTextProcessor
+{
+    public static string? PrepareForPackage(SetupManifest manifest)
+    {
+        if (string.IsNullOrWhiteSpace(manifest.LicenseText)) return manifest.LicenseText;
+
+        string text = NormalizeNewlines(manifest.LicenseText);
+        text = ExpandTokens(text, manifest);
+        text = FillCommonLicensePlaceholders(text, manifest);
+        return WrapParagraphs(text, 96);
+    }
+
+    private static string ExpandTokens(string text, SetupManifest manifest)
+    {
+        string year = DateTime.UtcNow.Year.ToString();
+        return text
+            .Replace("{ProductName}", manifest.ProductName, StringComparison.OrdinalIgnoreCase)
+            .Replace("{Identifier}", manifest.Identifier, StringComparison.OrdinalIgnoreCase)
+            .Replace("{Version}", manifest.Version, StringComparison.OrdinalIgnoreCase)
+            .Replace("{Publisher}", manifest.Publisher, StringComparison.OrdinalIgnoreCase)
+            .Replace("{Company}", manifest.Publisher, StringComparison.OrdinalIgnoreCase)
+            .Replace("{CopyrightYear}", year, StringComparison.OrdinalIgnoreCase)
+            .Replace("{Year}", year, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FillCommonLicensePlaceholders(string text, SetupManifest manifest)
+    {
+        string product = string.IsNullOrWhiteSpace(manifest.ProductName) ? "Application" : manifest.ProductName.Trim();
+        string publisher = string.IsNullOrWhiteSpace(manifest.Publisher) ? "Your Company" : manifest.Publisher.Trim();
+        string description = string.IsNullOrWhiteSpace(manifest.Description)
+            ? product
+            : manifest.Description.Trim().TrimEnd('.');
+        string year = DateTime.UtcNow.Year.ToString();
+
+        return text
+            .Replace("<program>", product, StringComparison.OrdinalIgnoreCase)
+            .Replace("<year>", year, StringComparison.OrdinalIgnoreCase)
+            .Replace("<name of author>", publisher, StringComparison.OrdinalIgnoreCase)
+            .Replace("<one line to give the program's name and a brief idea of what it does.>", description + ".", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string WrapParagraphs(string text, int width)
+    {
+        var blocks = NormalizeNewlines(text)
+            .Split(["\n\n"], StringSplitOptions.None)
+            .Select(block => WrapBlock(block, width));
+        return string.Join(Environment.NewLine + Environment.NewLine, blocks).TrimEnd();
+    }
+
+    private static string WrapBlock(string block, int width)
+    {
+        string[] lines = block.Split('\n');
+        if (lines.Length <= 1 || lines.Any(l => l.StartsWith("    ", StringComparison.Ordinal)))
+            return string.Join(Environment.NewLine, lines.Select(l => l.TrimEnd()));
+
+        string joined = string.Join(" ", lines.Select(l => l.Trim()).Where(l => l.Length > 0));
+        if (joined.Length <= width) return joined;
+
+        var output = new List<string>();
+        var current = new StringBuilder();
+        foreach (string word in joined.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (current.Length > 0 && current.Length + 1 + word.Length > width)
+            {
+                output.Add(current.ToString());
+                current.Clear();
+            }
+
+            if (current.Length > 0) current.Append(' ');
+            current.Append(word);
+        }
+
+        if (current.Length > 0) output.Add(current.ToString());
+        return string.Join(Environment.NewLine, output);
+    }
+
+    private static string NormalizeNewlines(string text) =>
+        text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 }
 
 internal static class ComponentMatcher

@@ -2,7 +2,9 @@
 
 #if WINDOWS
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Runtime.Versioning;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace AmSetup;
@@ -73,22 +75,24 @@ internal static partial class InstallerGui
         {
             using var stream = new MemoryStream(Convert.FromBase64String(branding.SplashImageBase64));
             using var image = Image.FromStream(stream);
+            Color transparentKey = Color.FromArgb(255, 1, 2, 3);
             using var splash = new Form
             {
                 StartPosition = FormStartPosition.CenterScreen,
-                FormBorderStyle = FormBorderStyle.FixedSingle,
+                FormBorderStyle = FormBorderStyle.None,
                 ControlBox = false,
                 ShowInTaskbar = false,
-                Width = Math.Clamp(image.Width + 28, 260, 620),
-                Height = Math.Clamp(image.Height + 58, 180, 520),
-                BackColor = Color.White
+                Width = Math.Clamp(image.Width, 260, 900),
+                Height = Math.Clamp(image.Height, 160, 520),
+                BackColor = transparentKey,
+                TransparencyKey = transparentKey
             };
             splash.Controls.Add(new PictureBox
             {
                 Image = new Bitmap(image),
                 SizeMode = PictureBoxSizeMode.Zoom,
                 Dock = DockStyle.Fill,
-                Padding = new Padding(12)
+                BackColor = transparentKey
             });
             var timer = new System.Windows.Forms.Timer { Interval = Math.Clamp(branding.SplashDurationMilliseconds, 250, 10000) };
             timer.Tick += (_, _) =>
@@ -191,18 +195,19 @@ internal sealed class InstallerWizardForm : Form
     private readonly Label _subtitle = new();
     private readonly Label _body = new();
     private readonly TextBox _target = new();
-    private readonly Button _browse = new();
-    private readonly Button _back = new();
-    private readonly Button _next = new();
-    private readonly Button _cancel = new();
-    private readonly ProgressBar _progress = new();
-    private readonly ProgressBar _fileProgress = new();
+    private readonly GlossyButton _browse = new();
+    private readonly GlossyButton _back = new();
+    private readonly GlossyButton _next = new();
+    private readonly GlossyButton _cancel = new();
+    private readonly GlossyProgressBar _progress = new();
+    private readonly GlossyProgressBar _fileProgress = new();
     private readonly Label _progressText = new();
     private readonly Label _fileProgressText = new();
     private readonly ListBox _log = new();
     private readonly string? _componentArg;
     private WizardPage _page = WizardPage.Welcome;
     private bool _installStarted;
+    private const int AboutSystemCommand = 0x1F10;
 
     public int ExitCode { get; private set; } = 2;
 
@@ -226,8 +231,32 @@ internal sealed class InstallerWizardForm : Form
         BackColor = _palette.ContentBack;
 
         BuildLayout(window.ShowSidebar);
+        InstallAboutContextMenu();
         _target.Text = target;
         Render();
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        IntPtr menu = GetSystemMenu(Handle, false);
+        if (menu != IntPtr.Zero)
+        {
+            AppendMenu(menu, 0x800, UIntPtr.Zero, null);
+            AppendMenu(menu, 0, (UIntPtr)AboutSystemCommand, "About " + _archive.Manifest.ProductName);
+        }
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int wmSysCommand = 0x0112;
+        if (m.Msg == wmSysCommand && ((int)m.WParam & 0xFFF0) == AboutSystemCommand)
+        {
+            ShowAbout();
+            return;
+        }
+
+        base.WndProc(ref m);
     }
 
     private void BuildLayout(bool showSidebar)
@@ -280,6 +309,33 @@ internal sealed class InstallerWizardForm : Form
         StyleButton(_back, secondary: true);
         StyleButton(_next, secondary: false);
     }
+
+    private void InstallAboutContextMenu()
+    {
+        var menu = new ContextMenuStrip
+        {
+            BackColor = _palette.ContentBack,
+            ForeColor = _palette.Text,
+            Renderer = new ToolStripProfessionalRenderer(new InstallerMenuColors(_palette))
+        };
+        menu.Items.Add("About " + _archive.Manifest.ProductName, null, (_, _) => ShowAbout());
+        ContextMenuStrip = menu;
+        _content.ContextMenuStrip = menu;
+        _sidebar.ContextMenuStrip = menu;
+        _buttonPanel.ContextMenuStrip = menu;
+    }
+
+    private void ShowAbout()
+    {
+        using var about = new AboutSetupForm(_archive, _palette);
+        about.ShowDialog(this);
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetSystemMenu(IntPtr hWnd, bool revert);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool AppendMenu(IntPtr hMenu, uint flags, UIntPtr newItemId, string? newItem);
 
     private void Render()
     {
@@ -370,17 +426,19 @@ internal sealed class InstallerWizardForm : Form
 
     private void RenderLicense()
     {
-        var box = new TextBox
+        var box = new RichTextBox
         {
-            Multiline = true,
             ReadOnly = true,
-            ScrollBars = ScrollBars.Vertical,
-            Text = _archive.Manifest.LicenseText,
+            ScrollBars = RichTextBoxScrollBars.Vertical,
+            DetectUrls = false,
+            WordWrap = true,
+            Text = LicenseTextProcessor.PrepareForPackage(_archive.Manifest) ?? "",
             Left = 24,
             Top = 100,
             Width = _content.ClientSize.Width - 48,
             Height = _content.ClientSize.Height - 124,
-            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+            Font = new Font("Segoe UI", 9F)
         };
         _content.Controls.Add(box);
     }
@@ -453,6 +511,8 @@ internal sealed class InstallerWizardForm : Form
 
     private void RenderInstalling()
     {
+        _progress.SetPalette(_palette);
+        _fileProgress.SetPalette(_palette);
         _progress.Left = 24;
         _progress.Top = 104;
         _progress.Width = _content.ClientSize.Width - 48;
@@ -599,13 +659,17 @@ internal sealed class InstallerWizardForm : Form
 
     private void PaintSidebar(object? sender, PaintEventArgs e)
     {
-        e.Graphics.Clear(_palette.Sidebar);
+        using var sidebarBack = new LinearGradientBrush(_sidebar.ClientRectangle, _palette.SidebarGlossTop, _palette.Sidebar, LinearGradientMode.Vertical);
+        e.Graphics.FillRectangle(sidebarBack, _sidebar.ClientRectangle);
         using var titleBrush = new SolidBrush(_palette.SidebarTitle);
         using var mutedBrush = new SolidBrush(_palette.SidebarMuted);
         using var accentBrush = new SolidBrush(_palette.Accent);
+        using var accentGloss = new LinearGradientBrush(new Rectangle(0, 0, 6, _sidebar.Height), _palette.AccentHover, _palette.AccentDown, LinearGradientMode.Vertical);
         using var titleFont = new Font(Font.FontFamily, 13F, FontStyle.Bold);
         using var smallFont = new Font(Font.FontFamily, 8.5F);
-        e.Graphics.FillRectangle(accentBrush, 0, 0, 6, _sidebar.Height);
+        e.Graphics.FillRectangle(accentGloss, 0, 0, 6, _sidebar.Height);
+        using var shine = new SolidBrush(Color.FromArgb(38, Color.White));
+        e.Graphics.FillRectangle(shine, 6, 0, Math.Max(0, _sidebar.Width - 6), 64);
         e.Graphics.DrawString(_archive.Manifest.ProductName, titleFont, titleBrush, new RectangleF(18, 28, _sidebar.Width - 30, 70));
         e.Graphics.DrawString("Setup Wizard", smallFont, mutedBrush, new PointF(20, 102));
 
@@ -636,6 +700,11 @@ internal sealed class InstallerWizardForm : Form
         {
             switch (control)
             {
+                case RichTextBox richText:
+                    richText.BackColor = _palette.InputBack;
+                    richText.ForeColor = _palette.Text;
+                    richText.BorderStyle = BorderStyle.FixedSingle;
+                    break;
                 case TextBox text:
                     text.BackColor = _palette.InputBack;
                     text.ForeColor = _palette.Text;
@@ -666,6 +735,8 @@ internal sealed class InstallerWizardForm : Form
 
     private void StyleButton(Button button, bool secondary)
     {
+        if (button is GlossyButton glossy)
+            glossy.SetPalette(_palette, secondary);
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderColor = secondary ? _palette.ButtonBorder : _palette.Accent;
         button.FlatAppearance.MouseOverBackColor = secondary ? _palette.ButtonHover : _palette.AccentHover;
@@ -710,6 +781,20 @@ internal sealed class InstallerWizardForm : Form
         Color LogBack,
         Color LogText)
     {
+        public Color SidebarGlossTop => Blend(Sidebar, Color.White, 0.16);
+        public Color ButtonGlossTop => Blend(SecondaryButtonBack, Color.White, 0.24);
+        public Color AccentGlossTop => Blend(Accent, Color.White, 0.30);
+        public Color ProgressBack => Blend(InputBack, Color.Black, 0.10);
+
+        public static Color Blend(Color from, Color to, double amount)
+        {
+            amount = Math.Clamp(amount, 0, 1);
+            return Color.FromArgb(
+                (int)Math.Round(from.R + (to.R - from.R) * amount),
+                (int)Math.Round(from.G + (to.G - from.G) * amount),
+                (int)Math.Round(from.B + (to.B - from.B) * amount));
+        }
+
         public static InstallerPalette Resolve(SetupTheme theme, SetupWindow window)
         {
             string style = (window.Style ?? "").Trim().ToLowerInvariant();
@@ -810,6 +895,186 @@ internal sealed class InstallerWizardForm : Form
                     Color.White,
                     Color.Black)
             };
+        }
+    }
+
+    private sealed class GlossyButton : Button
+    {
+        private InstallerPalette? _palette;
+        private bool _secondary;
+
+        public GlossyButton()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            FlatStyle = FlatStyle.Flat;
+        }
+
+        public void SetPalette(InstallerPalette palette, bool secondary)
+        {
+            _palette = palette;
+            _secondary = secondary;
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (_palette is null)
+            {
+                base.OnPaint(e);
+                return;
+            }
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var bounds = ClientRectangle;
+            bounds.Width--;
+            bounds.Height--;
+            Color top = _secondary ? _palette.ButtonGlossTop : _palette.AccentGlossTop;
+            Color bottom = _secondary ? _palette.SecondaryButtonBack : _palette.Accent;
+            if (ClientRectangle.Contains(PointToClient(Cursor.Position)))
+            {
+                top = InstallerPalette.Blend(top, Color.White, 0.12);
+                bottom = _secondary ? _palette.ButtonHover : _palette.AccentHover;
+            }
+
+            using var brush = new LinearGradientBrush(bounds, top, bottom, LinearGradientMode.Vertical);
+            using var border = new Pen(_secondary ? _palette.ButtonBorder : _palette.AccentDown);
+            using var shine = new SolidBrush(Color.FromArgb(80, Color.White));
+            e.Graphics.FillRectangle(brush, bounds);
+            e.Graphics.FillRectangle(shine, 1, 1, Math.Max(0, bounds.Width - 1), Math.Max(0, bounds.Height / 2 - 1));
+            e.Graphics.DrawRectangle(border, bounds);
+            TextRenderer.DrawText(e.Graphics, Text, Font, bounds, _secondary ? _palette.ButtonText : _palette.AccentText, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    private sealed class GlossyProgressBar : ProgressBar
+    {
+        private InstallerPalette? _palette;
+
+        public GlossyProgressBar()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        }
+
+        public void SetPalette(InstallerPalette palette)
+        {
+            _palette = palette;
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (_palette is null)
+            {
+                base.OnPaint(e);
+                return;
+            }
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var bounds = ClientRectangle;
+            bounds.Width--;
+            bounds.Height--;
+            using var back = new LinearGradientBrush(bounds, _palette.ProgressBack, _palette.InputBack, LinearGradientMode.Vertical);
+            using var border = new Pen(_palette.ButtonBorder);
+            e.Graphics.FillRectangle(back, bounds);
+            e.Graphics.DrawRectangle(border, bounds);
+
+            double percent = Maximum <= Minimum ? 1 : (Value - Minimum) / (double)(Maximum - Minimum);
+            int fillWidth = Math.Clamp((int)Math.Round(bounds.Width * percent), 0, bounds.Width);
+            if (fillWidth <= 0) return;
+
+            var fill = new Rectangle(1, 1, fillWidth, Math.Max(1, bounds.Height - 1));
+            using var fillBrush = new LinearGradientBrush(fill, _palette.AccentGlossTop, _palette.AccentDown, LinearGradientMode.Vertical);
+            using var shine = new SolidBrush(Color.FromArgb(88, Color.White));
+            e.Graphics.FillRectangle(fillBrush, fill);
+            e.Graphics.FillRectangle(shine, fill.Left, fill.Top, fill.Width, Math.Max(1, fill.Height / 2));
+        }
+    }
+
+    private sealed class InstallerMenuColors(InstallerPalette palette) : ProfessionalColorTable
+    {
+        public override Color ToolStripDropDownBackground => palette.ContentBack;
+        public override Color MenuItemSelected => palette.ButtonHover;
+        public override Color MenuItemBorder => palette.Accent;
+        public override Color ImageMarginGradientBegin => palette.ContentBack;
+        public override Color ImageMarginGradientMiddle => palette.ContentBack;
+        public override Color ImageMarginGradientEnd => palette.ContentBack;
+        public override Color SeparatorDark => palette.ButtonBorder;
+        public override Color SeparatorLight => palette.ButtonHover;
+    }
+
+    private sealed class AboutSetupForm : Form
+    {
+        public AboutSetupForm(PackageArchive archive, InstallerPalette palette)
+        {
+            Text = "About " + archive.Manifest.ProductName;
+            Width = 440;
+            Height = 270;
+            MinimumSize = new Size(420, 250);
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            Font = new Font("Segoe UI", 9F);
+            BackColor = palette.ContentBack;
+            ForeColor = palette.Text;
+
+            var header = new Panel { Dock = DockStyle.Top, Height = 82 };
+            header.Paint += (_, e) =>
+            {
+                using var brush = new LinearGradientBrush(header.ClientRectangle, palette.SidebarGlossTop, palette.Sidebar, LinearGradientMode.Vertical);
+                e.Graphics.FillRectangle(brush, header.ClientRectangle);
+                using var shine = new SolidBrush(Color.FromArgb(45, Color.White));
+                e.Graphics.FillRectangle(shine, 0, 0, header.Width, 35);
+            };
+
+            var title = new Label
+            {
+                Text = archive.Manifest.ProductName,
+                Left = 18,
+                Top = 15,
+                Width = 380,
+                Height = 26,
+                Font = new Font(Font.FontFamily, 14F, FontStyle.Bold),
+                BackColor = Color.Transparent,
+                ForeColor = palette.SidebarTitle
+            };
+            var subtitle = new Label
+            {
+                Text = $"Version {archive.Manifest.Version} - {archive.Manifest.Publisher}",
+                Left = 20,
+                Top = 44,
+                Width = 380,
+                Height = 22,
+                BackColor = Color.Transparent,
+                ForeColor = palette.SidebarMuted
+            };
+            header.Controls.AddRange([title, subtitle]);
+
+            var details = new Label
+            {
+                Text = $"{archive.Manifest.Description}{Environment.NewLine}{Environment.NewLine}Files: {archive.Entries.Count:N0}{Environment.NewLine}Package: {archive.CompressedBytes:N0} bytes{Environment.NewLine}Built with amSetup",
+                Left = 20,
+                Top = 100,
+                Width = 390,
+                Height = 96,
+                ForeColor = palette.Text,
+                BackColor = palette.ContentBack
+            };
+
+            var ok = new GlossyButton
+            {
+                Text = "OK",
+                Width = 92,
+                Height = 30,
+                Left = Width - 128,
+                Top = 200,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
+            };
+            ok.SetPalette(palette, secondary: false);
+            ok.Click += (_, _) => Close();
+            Controls.AddRange([header, details, ok]);
+            AcceptButton = ok;
         }
     }
 

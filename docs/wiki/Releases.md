@@ -3,7 +3,7 @@
 Releases are created from tags:
 
 ```powershell
-git tag -a v0.2.0.0 -m "amSetup 0.2.0.0"
+git tag -a v0.2.1.0 -m "amSetup 0.2.1.0"
 git push origin main --tags
 ```
 

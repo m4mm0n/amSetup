@@ -17,7 +17,9 @@ Important sections:
 - `prerequisites`
 - `postInstall`
 
-Path templates include `{ProductName}`, `{Identifier}`, `{Version}`, `{Home}`,
-`{LocalAppData}`, `{AppData}`, `{ProgramFiles}`, and `{InstallDir}`.
+Path templates include `{ProductName}`, `{Identifier}`, `{Version}`,
+`{Publisher}`, `{Home}`, `{LocalAppData}`, `{AppData}`, `{ProgramFiles}`, and
+`{InstallDir}`. On Windows, the default install folder is
+`{ProgramFiles}\{Publisher}\{ProductName}`.
 
 See the repository README for the complete example.

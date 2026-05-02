@@ -48,7 +48,7 @@ internal static class Program
                   "publisher": "amSetup",
                   "description": "Validation package",
                   "defaultInstallDirectory": "{Home}/.amsetup-validation/ValidationApp",
-                  "licenseText": "",
+                  "licenseText": "Validation license for {ProductName} {Version} by {Publisher}.\n\n<program> Copyright (C) <year> <name of author>",
                   "requireConfirmation": false,
                   "branding": {
                     "iconPath": "",
@@ -178,6 +178,11 @@ internal static class Program
                 throw new InvalidOperationException("Install directories were not created.");
             if (!File.Exists(Path.Combine(install, ".amsetup", "install.json")))
                 throw new InvalidOperationException("Install receipt was not written.");
+            string receipt = File.ReadAllText(Path.Combine(install, ".amsetup", "install.json"), Encoding.UTF8);
+            if (!receipt.Contains("Validation license for Validation App 1.2.3 by amSetup", StringComparison.Ordinal) ||
+                receipt.Contains("<program>", StringComparison.Ordinal) ||
+                receipt.Contains("<name of author>", StringComparison.Ordinal))
+                throw new InvalidOperationException("License text was not prepared with manifest metadata.");
             if (!File.Exists(Path.Combine(install, ".amsetup", OperatingSystem.IsWindows() ? "uninstall.exe" : "uninstall")) &&
                 !File.Exists(Path.Combine(install, $"Uninstall Validation App{(OperatingSystem.IsWindows() ? ".cmd" : ".sh")}")))
                 throw new InvalidOperationException("Uninstaller was not created.");

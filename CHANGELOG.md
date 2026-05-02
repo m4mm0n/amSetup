@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1.0 - 2026-05-02
+
+- Added automatic license text preparation during packaging, including manifest
+  token expansion, GPL appendix placeholder filling, and cleaner paragraph
+  wrapping for the Windows license page.
+- Changed the default Windows install path to
+  `{ProgramFiles}\{Publisher}\{ProductName}`.
+- Added `{Publisher}` support to path templates.
+- Added a themed About dialog through the installer window context/system menu.
+- Made Windows installer themes glossier with gradient sidebars, buttons, and
+  progress bars.
+- Fixed transparent PNG splash rendering in the Windows installer splash window.
+
 ## 0.2.0.0 - 2026-05-02
 
 - Added a traditional Windows installer wizard with package-loading progress,

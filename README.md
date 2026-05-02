@@ -166,7 +166,7 @@ When repacking, stale `.ampkg` and `.ampkg.*` files for the same output name are
   "version": "1.0.0",
   "publisher": "My Company",
   "description": "My product installer",
-  "defaultInstallDirectory": "{LocalAppData}\\Programs\\{ProductName}",
+  "defaultInstallDirectory": "{ProgramFiles}\\{Publisher}\\{ProductName}",
   "licenseText": "Optional license text.",
   "requireConfirmation": true,
   "branding": {
@@ -279,7 +279,9 @@ When repacking, stale `.ampkg` and `.ampkg.*` files for the same output name are
 
 ## Manifest Fields
 
-Path templates support `{ProductName}`, `{Identifier}`, `{Version}`, `{Home}`, `{LocalAppData}`, `{AppData}`, `{ProgramFiles}`, and `{InstallDir}`.
+Path templates support `{ProductName}`, `{Identifier}`, `{Version}`, `{Publisher}`, `{Home}`, `{LocalAppData}`, `{AppData}`, `{ProgramFiles}`, and `{InstallDir}`.
+
+On Windows, a missing or legacy default install path resolves to `{ProgramFiles}\{Publisher}\{ProductName}`.
 
 `components[].include` supports exact paths, directory prefixes, `*`, `**`, and simple prefix globs like `bin/**`.
 

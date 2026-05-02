@@ -32,7 +32,8 @@ internal static class BrandingProcessor
             branding = branding with { IconPath = icon, SplashImageBase64 = "", SplashContentType = "" };
         }
 
-        return manifest with { Branding = branding };
+        var prepared = manifest with { Branding = branding };
+        return prepared with { LicenseText = LicenseTextProcessor.PrepareForPackage(prepared) };
     }
 
     private static string? ResolveOptionalFile(string baseDirectory, string path)

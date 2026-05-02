@@ -1,19 +1,18 @@
-# amSetup 0.2.0.0
+# amSetup 0.2.1.0
 
-This release turns the generated Windows installer into a traditional setup
-wizard and adds uninstall support.
+This release polishes the generated Windows installer and fixes packaging
+details found while building the amChipper setup.
 
 Highlights:
 
-- Traditional Windows setup wizard for generated production installers, with
-  welcome, license, destination, component, shortcut, install progress, and
-  finish pages.
-- Theme palettes for blue, dark, amber, and oldschool installers.
-- Package-loading progress plus separate overall/current-file install progress.
-- Receipt-based uninstaller generation.
-- Interactive shortcut tasks for desktop, Start Menu/applications menu, and
-  install-folder launchers.
-- Sample GUI setup installers under `artifacts/sample-setup` when built locally.
+- Transparent PNG splash logos now render correctly in the Windows installer.
+- License text is prepared during packaging with manifest token expansion,
+  GPL placeholder filling, and cleaner wrapping for the agreement page.
+- The default Windows install folder is now
+  `{ProgramFiles}\{Publisher}\{ProductName}`.
+- The installer exposes a themed About dialog from the window context/system
+  menu.
+- Windows themes now draw glossier sidebars, buttons, and progress bars.
 - Embedded, adjacent, and split package layouts.
 - Brotli compression with speed/size options.
 
