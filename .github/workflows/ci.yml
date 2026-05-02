@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+          dotnet-quality: preview
+
+      - name: Build
+        run: dotnet build .\amSetup.slnx -c Release -warnaserror
+
+      - name: Validation
+        run: dotnet run --no-build --project .\tests\amSetup.Validation\amSetup.Validation.csproj -c Release
+
+      - name: Format check
+        run: dotnet format .\amSetup.slnx --verify-no-changes --no-restore

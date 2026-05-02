@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build Release Stubs
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+          dotnet-quality: preview
+
+      - name: Validate
+        run: |
+          dotnet build .\amSetup.slnx -c Release -warnaserror
+          dotnet run --no-build --project .\tests\amSetup.Validation\amSetup.Validation.csproj -c Release
+          dotnet format .\amSetup.slnx --verify-no-changes --no-restore
+
+      - name: Publish stubs
+        run: .\build-stubs.ps1 -NoAot
+
+      - name: Pack release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          foreach ($rid in Get-ChildItem artifacts\stubs -Directory) {
+            Compress-Archive -Path (Join-Path $rid.FullName '*') -DestinationPath "release\amSetup-$($rid.Name).zip" -Force
+          }
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+          body_path: RELEASE_NOTES.md

@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <Authors>m4mm0n</Authors>
+    <Company>m4mm0n</Company>
+    <Copyright>Copyright (C) 2026 m4mm0n</Copyright>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/m4mm0n/amSetup</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/m4mm0n/amSetup</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>installer;setup;self-extracting;dotnet;windows;linux;macos</PackageTags>
+  </PropertyGroup>
+</Project>

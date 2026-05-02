@@ -1,0 +1,34 @@
+# Build output
+bin/
+obj/
+artifacts/
+Ready2Release/
+publish/
+dist/
+
+# Installer packages and generated setup files
+*.ampkg
+*.ampkg.*
+*.nupkg
+*.snupkg
+
+# Local builder projects and payloads
+amsetup.json
+amsetup.project.json
+dependency-report.json
+payload/
+
+# IDE and OS files
+.vs/
+.vscode/
+*.user
+*.suo
+*.tmp
+*.log
+Thumbs.db
+Desktop.ini
+
+# Test output
+TestResults/
+coverage/
+*.trx
