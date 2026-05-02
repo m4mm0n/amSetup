@@ -1,18 +1,19 @@
-# amSetup 0.2.1.0
+# amSetup 0.2.2.0
 
-This release polishes the generated Windows installer and fixes packaging
-details found while building the amChipper setup.
+This release finishes the Windows setup theming pass by covering the
+taskbar-visible package-loading window and native window chrome.
 
 Highlights:
 
-- Transparent PNG splash logos now render correctly in the Windows installer.
-- License text is prepared during packaging with manifest token expansion,
-  GPL placeholder filling, and cleaner wrapping for the agreement page.
-- The default Windows install folder is now
-  `{ProgramFiles}\{Publisher}\{ProductName}`.
-- The installer exposes a themed About dialog from the window context/system
-  menu.
-- Windows themes now draw glossier sidebars, buttons, and progress bars.
+- The early `Preparing Setup` package-loading window is now dark/themed instead
+  of plain white.
+- The loading window uses the same glossy progress style as the main setup
+  wizard.
+- Windows DWM caption, border, and title text colors are applied to the loading
+  window, main installer wizard, and About dialog when supported by the OS.
+- Previous 0.2.1.0 polish remains included: transparent PNG splash rendering,
+  license preparation, `{ProgramFiles}\{Publisher}\{ProductName}` defaults, and
+  the themed About dialog.
 - Embedded, adjacent, and split package layouts.
 - Brotli compression with speed/size options.
 

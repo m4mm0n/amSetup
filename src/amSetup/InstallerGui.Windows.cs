@@ -114,15 +114,19 @@ internal static partial class InstallerGui
 [SupportedOSPlatform("windows")]
 internal sealed class PackageLoadingForm : Form
 {
-    private readonly ProgressBar _progress = new();
+    private readonly LoadingProgressBar _progress = new();
     private readonly Label _stage = new();
+    private static readonly Color Back = Color.FromArgb(18, 22, 27);
+    private static readonly Color Panel = Color.FromArgb(25, 29, 34);
+    private static readonly Color Accent = Color.FromArgb(65, 199, 165);
+    private static readonly Color TextColor = Color.FromArgb(232, 236, 240);
     private bool _complete;
 
     public PackageLoadingForm()
     {
         Text = "Preparing Setup";
-        Width = 420;
-        Height = 138;
+        Width = 460;
+        Height = 154;
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         ControlBox = false;
@@ -130,22 +134,31 @@ internal sealed class PackageLoadingForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         Font = new Font("Segoe UI", 9F);
-        BackColor = Color.White;
+        BackColor = Back;
 
         _stage.Text = "Loading setup package...";
         _stage.Left = 18;
         _stage.Top = 18;
-        _stage.Width = 366;
+        _stage.Width = 406;
         _stage.Height = 24;
+        _stage.ForeColor = TextColor;
+        _stage.BackColor = Back;
         _progress.Left = 18;
         _progress.Top = 52;
-        _progress.Width = 366;
+        _progress.Width = 406;
         _progress.Height = 23;
+        _progress.SetColors(Panel, Accent, Color.FromArgb(82, 94, 106));
         Controls.AddRange([_stage, _progress]);
         Shown += (_, _) =>
         {
             if (_complete) Close();
         };
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        WindowsChromeTheme.Apply(Handle, Color.FromArgb(12, 17, 22), TextColor, Accent, useDarkMode: true);
     }
 
     public void Report(PackageLoadProgress progress)
@@ -168,6 +181,96 @@ internal sealed class PackageLoadingForm : Form
         _complete = true;
         if (IsHandleCreated) BeginInvoke(Close);
     }
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class LoadingProgressBar : ProgressBar
+{
+    private Color _back = Color.FromArgb(25, 29, 34);
+    private Color _fill = Color.FromArgb(65, 199, 165);
+    private Color _border = Color.FromArgb(82, 94, 106);
+
+    public LoadingProgressBar()
+    {
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+    }
+
+    public void SetColors(Color back, Color fill, Color border)
+    {
+        _back = back;
+        _fill = fill;
+        _border = border;
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var bounds = ClientRectangle;
+        bounds.Width--;
+        bounds.Height--;
+        using var back = new LinearGradientBrush(bounds, ColorBlend(_back, Color.White, 0.08), _back, LinearGradientMode.Vertical);
+        using var border = new Pen(_border);
+        e.Graphics.FillRectangle(back, bounds);
+        e.Graphics.DrawRectangle(border, bounds);
+
+        double percent = Maximum <= Minimum ? 1 : (Value - Minimum) / (double)(Maximum - Minimum);
+        int fillWidth = Math.Clamp((int)Math.Round(bounds.Width * percent), 0, bounds.Width);
+        if (fillWidth <= 0) return;
+
+        var fill = new Rectangle(1, 1, fillWidth, Math.Max(1, bounds.Height - 1));
+        using var fillBrush = new LinearGradientBrush(fill, ColorBlend(_fill, Color.White, 0.32), ColorBlend(_fill, Color.Black, 0.18), LinearGradientMode.Vertical);
+        using var shine = new SolidBrush(Color.FromArgb(90, Color.White));
+        e.Graphics.FillRectangle(fillBrush, fill);
+        e.Graphics.FillRectangle(shine, fill.Left, fill.Top, fill.Width, Math.Max(1, fill.Height / 2));
+    }
+
+    private static Color ColorBlend(Color from, Color to, double amount)
+    {
+        amount = Math.Clamp(amount, 0, 1);
+        return Color.FromArgb(
+            (int)Math.Round(from.R + (to.R - from.R) * amount),
+            (int)Math.Round(from.G + (to.G - from.G) * amount),
+            (int)Math.Round(from.B + (to.B - from.B) * amount));
+    }
+}
+
+[SupportedOSPlatform("windows")]
+internal static class WindowsChromeTheme
+{
+    private const int DwmwaUseImmersiveDarkMode = 20;
+    private const int DwmwaBorderColor = 34;
+    private const int DwmwaCaptionColor = 35;
+    private const int DwmwaTextColor = 36;
+
+    public static void Apply(IntPtr handle, Color caption, Color text, Color border, bool useDarkMode)
+    {
+        if (handle == IntPtr.Zero) return;
+        TrySetInt(handle, DwmwaUseImmersiveDarkMode, useDarkMode ? 1 : 0);
+        TrySetColor(handle, DwmwaCaptionColor, caption);
+        TrySetColor(handle, DwmwaTextColor, text);
+        TrySetColor(handle, DwmwaBorderColor, border);
+    }
+
+    private static void TrySetInt(IntPtr handle, int attribute, int value)
+    {
+        try
+        {
+            _ = DwmSetWindowAttribute(handle, attribute, ref value, sizeof(int));
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TrySetColor(IntPtr handle, int attribute, Color color)
+    {
+        int value = ColorTranslator.ToWin32(color);
+        TrySetInt(handle, attribute, value);
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int attributeValue, int attributeSize);
 }
 
 [SupportedOSPlatform("windows")]
@@ -239,6 +342,7 @@ internal sealed class InstallerWizardForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        WindowsChromeTheme.Apply(Handle, _palette.Sidebar, _palette.SidebarTitle, _palette.Accent, _palette.UseDarkCaption);
         IntPtr menu = GetSystemMenu(Handle, false);
         if (menu != IntPtr.Zero)
         {
@@ -785,6 +889,7 @@ internal sealed class InstallerWizardForm : Form
         public Color ButtonGlossTop => Blend(SecondaryButtonBack, Color.White, 0.24);
         public Color AccentGlossTop => Blend(Accent, Color.White, 0.30);
         public Color ProgressBack => Blend(InputBack, Color.Black, 0.10);
+        public bool UseDarkCaption => Brightness(Sidebar) < 150;
 
         public static Color Blend(Color from, Color to, double amount)
         {
@@ -794,6 +899,8 @@ internal sealed class InstallerWizardForm : Form
                 (int)Math.Round(from.G + (to.G - from.G) * amount),
                 (int)Math.Round(from.B + (to.B - from.B) * amount));
         }
+
+        private static double Brightness(Color color) => (color.R * 0.299) + (color.G * 0.587) + (color.B * 0.114);
 
         public static InstallerPalette Resolve(SetupTheme theme, SetupWindow window)
         {
@@ -1004,8 +1111,11 @@ internal sealed class InstallerWizardForm : Form
 
     private sealed class AboutSetupForm : Form
     {
+        private readonly InstallerPalette _palette;
+
         public AboutSetupForm(PackageArchive archive, InstallerPalette palette)
         {
+            _palette = palette;
             Text = "About " + archive.Manifest.ProductName;
             Width = 440;
             Height = 270;
@@ -1075,6 +1185,12 @@ internal sealed class InstallerWizardForm : Form
             ok.Click += (_, _) => Close();
             Controls.AddRange([header, details, ok]);
             AcceptButton = ok;
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            WindowsChromeTheme.Apply(Handle, _palette.Sidebar, _palette.SidebarTitle, _palette.Accent, _palette.UseDarkCaption);
         }
     }
 

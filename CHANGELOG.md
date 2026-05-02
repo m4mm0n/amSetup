@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2.0 - 2026-05-02
+
+- The package-loading taskbar window is now themed instead of using the default
+  white WinForms surface.
+- Applied native Windows caption, border, and title text colors to the loading
+  window, installer wizard, and About dialog where supported by DWM.
+- Reused glossy themed progress rendering for the early package-loading
+  progress window.
+
 ## 0.2.1.0 - 2026-05-02
 
 - Added automatic license text preparation during packaging, including manifest
