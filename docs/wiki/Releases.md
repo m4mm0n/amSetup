@@ -1,5 +1,13 @@
 # Releases
 
+## 0.2.4.0
+
+This release fixes the builder web host lifecycle and expands package
+compression. The builder UI now exposes Exit Builder and a local shutdown
+endpoint so the process stops cleanly. Package builds can now use Brotli,
+zlib, LZMA, aPLib, or store mode, and validation round-trips each mode through
+pack, inspect, install, and uninstall.
+
 ## 0.2.3.0
 
 This release fixes the setup-builder preview so it follows the final Windows
@@ -18,7 +26,7 @@ window, main installer wizard, and About dialog where supported.
 Releases are created from tags:
 
 ```powershell
-git tag -a v0.2.3.0 -m "amSetup 0.2.3.0"
+git tag -a v0.2.4.0 -m "amSetup 0.2.4.0"
 git push origin main --tags
 ```
 

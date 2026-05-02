@@ -187,14 +187,27 @@ internal static class SetupBuilderUi
 
         while (listener.IsListening)
         {
-            var context = listener.GetContext();
-            Handle(context, projectPath);
+            HttpListenerContext context;
+            try
+            {
+                context = listener.GetContext();
+            }
+            catch (HttpListenerException) when (!listener.IsListening)
+            {
+                break;
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
+
+            Handle(context, projectPath, listener);
         }
 
         return 0;
     }
 
-    private static void Handle(HttpListenerContext context, string defaultProject)
+    private static void Handle(HttpListenerContext context, string defaultProject, HttpListener listener)
     {
         try
         {
@@ -225,6 +238,18 @@ internal static class SetupBuilderUi
                 string project = context.Request.QueryString["project"] ?? defaultProject;
                 string payload = context.Request.QueryString["payload"] ?? "";
                 WriteJson(context, LocalBrowser.PayloadFiles(project, payload), AmSetupJsonContext.Default.PayloadFileResult);
+                return;
+            }
+
+            if (context.Request.HttpMethod == "POST" && path == "/api/shutdown")
+            {
+                WriteText(context, "amSetup Builder is shutting down.", "text/plain; charset=utf-8");
+                _ = Task.Run(() =>
+                {
+                    Thread.Sleep(100);
+                    try { listener.Stop(); }
+                    catch (ObjectDisposedException) { }
+                });
                 return;
             }
 
@@ -316,7 +341,7 @@ internal static class SetupBuilderUi
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Segoe UI,Roboto,Arial,sans-serif;font-size:14px}
 header{height:60px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 18px;background:var(--band)}
 h1{font-size:18px;margin:0;font-weight:650}.sub{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.toolbar{display:flex;gap:8px;margin-left:auto}
-button{background:#243039;border:1px solid #3b4850;color:var(--text);padding:8px 12px;border-radius:6px;cursor:pointer;font:inherit}button.primary{background:#13785f;border-color:#2db392}button.gold{background:#6e521e;border-color:#b1832c}button:hover{filter:brightness(1.12)}
+button{background:#243039;border:1px solid #3b4850;color:var(--text);padding:8px 12px;border-radius:6px;cursor:pointer;font:inherit}button.primary{background:#13785f;border-color:#2db392}button.gold{background:#6e521e;border-color:#b1832c}button.danger{background:#57202a;border-color:#9f3b4c}button:hover{filter:brightness(1.12)}
 main{display:grid;grid-template-columns:330px 1fr;min-height:calc(100vh - 60px)}
 aside{border-right:1px solid var(--line);padding:16px;background:#171d20;overflow:auto}
 section{padding:16px;overflow:auto}.group{border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:14px}
@@ -335,12 +360,12 @@ details{background:#171d20;border:1px solid var(--line);border-radius:8px;paddin
 </style>
 </head>
 <body>
-<header><h1>amSetup Builder</h1><div id="projectName" class="sub"></div><div class="toolbar"><button onclick="loadState()">Reload</button><button onclick="previewInstaller()">Preview</button><button onclick="save()">Save</button><button onclick="analyze()">Analyze</button><button class="primary" onclick="build()">Build Installer</button></div></header>
+<header><h1>amSetup Builder</h1><div id="projectName" class="sub"></div><div class="toolbar"><button onclick="loadState()">Reload</button><button onclick="previewInstaller()">Preview</button><button onclick="save()">Save</button><button onclick="analyze()">Analyze</button><button class="primary" onclick="build()">Build Installer</button><button class="danger" onclick="shutdownBuilder()">Exit Builder</button></div></header>
 <main>
 <aside>
 <div class="group"><h2>Build Flow</h2><div class="steps"><div class="step"><div class="num">1</div><div>Set product name and install folder.</div></div><div class="step"><div class="num">2</div><div>Point payload to your published app folder.</div></div><div class="step"><div class="num">3</div><div>Analyze dependencies, then build.</div></div></div></div>
 <div class="group"><h2>Project</h2><label>Project file</label><input id="projectFile"><label>Manifest</label><input id="manifestPath"><label>Payload folder</label><div class="pathrow"><input id="payloadPath"><button onclick="openPicker('payloadPath','folder')">Browse</button></div><label>Output installer</label><input id="outputPath"><label>Stub executable</label><div class="pathrow"><input id="stubPath" placeholder="empty = this amSetup executable"><button onclick="openPicker('stubPath','exe')">Browse</button></div></div>
-<div class="group"><h2>Package</h2><div class="grid"><div><label>Compression</label><select id="compression"><option>Fastest</option><option selected>Balanced</option><option>Smallest</option><option>Store</option></select></div><div><label>Layout</label><select id="layout"><option>Embedded</option><option>External</option><option>Split</option></select></div></div><label>Chunk size</label><input id="chunkSize" value="512m"><label><input id="allowFramework" type="checkbox"> allow local dev stub</label></div>
+<div class="group"><h2>Package</h2><div class="grid"><div><label>Compression</label><select id="compression"><option value="Fastest">Brotli Fastest</option><option value="Balanced" selected>Brotli Balanced</option><option value="Smallest">Brotli Smallest</option><option value="ZLibFastest">ZLib Fastest</option><option value="ZLibBalanced">ZLib Balanced</option><option value="ZLibSmallest">ZLib Smallest</option><option value="Lzma">LZMA</option><option value="Aplib">aPLib</option><option value="Store">Store</option></select></div><div><label>Layout</label><select id="layout"><option>Embedded</option><option>External</option><option>Split</option></select></div></div><label>Chunk size</label><input id="chunkSize" value="512m"><label><input id="allowFramework" type="checkbox"> allow local dev stub</label></div>
 <div class="group"><h2>Status</h2><div id="status" class="status">Ready.</div></div>
 </aside>
 <section>
@@ -417,6 +442,7 @@ async function loadState(){try{const p=encodeURIComponent($('projectFile')?.valu
 async function save(){try{const r=await api('/api/save',{projectFile:$('projectFile').value,project:project(),manifest:manifest()});fill(r);setStatus('Saved project and manifest.');}catch(e){setStatus(e.message);}}
 async function analyze(){try{const r=await api('/api/analyze',{projectFile:$('projectFile').value,project:project(),manifest:manifest()});renderReport(r);fill({projectFile:$('projectFile').value,project:project(),manifest:r.suggestedManifest,defaultIconPath:current.defaultIconPath,defaultSplashPath:current.defaultSplashPath});current.prerequisites=r.prerequisites||current.prerequisites||[];renderPrerequisites();setStatus('Analysis complete. Suggested installer settings were applied.');}catch(e){setStatus(e.message);}}
 async function build(){try{const r=await api('/api/build',{projectFile:$('projectFile').value,project:project(),manifest:manifest(),allowFrameworkDependentStub:$('allowFramework').checked});setStatus(r.message);}catch(e){setStatus(e.message);}}
+async function shutdownBuilder(){if(!confirm('Exit amSetup Builder?'))return;try{await fetch('/api/shutdown',{method:'POST'});setStatus('Builder is shutting down. You can close this tab.');}catch(e){setStatus('Builder is shutting down. You can close this tab.');}}
 function renderReport(r){$('summary').innerHTML=`<span class="pill">${r.totalFiles} files</span><span class="pill">${bytes(r.totalBytes)}</span><span class="pill">${r.dotNetApplications.length} .NET apps</span><span class="pill">${(r.prerequisites||[]).length} prereq(s)</span><span class="pill">${r.issues.length} issues</span>`;$('issues').innerHTML=r.issues.map(i=>`<div class="issue ${i.severity}"><b>${i.severity.toUpperCase()} ${i.code}</b><br>${escapeHtml(i.message)}${i.path?'<br><small>'+escapeHtml(i.path)+'</small>':''}</div>`).join('')||'<div class="status">No dependency issues found.</div>';}
 function setStatus(t){$('status').textContent=t;}function bytes(n){if(n>1073741824)return(n/1073741824).toFixed(1)+' GB';if(n>1048576)return(n/1048576).toFixed(1)+' MB';if(n>1024)return(n/1024).toFixed(1)+' KB';return n+' B';}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.4.0 - 2026-05-03
+
+- Added a clean builder shutdown path with an Exit Builder button and
+  `/api/shutdown`, so closing the web UI no longer leaves the host process
+  stranded.
+- Added package compression modes for zlib fastest/balanced/smallest, LZMA,
+  and aPLib while preserving the existing Brotli/store modes.
+- Extended validation to round-trip every supported compression mode through
+  pack, inspect, install, and uninstall.
+
 ## 0.2.3.0 - 2026-05-03
 
 - Rebuilt the setup-builder web preview to mirror the generated Windows

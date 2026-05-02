@@ -15,7 +15,7 @@
 - Includes an oldschool default setup icon and manifest-controlled custom setup icon/splash branding.
 - Supports selected install folders, interactive confirmation, silent install, dry-run, package inspection, and file listing.
 - Supports embedded self-extracting installers, adjacent package archives, or split package archives.
-- Uses built-in Brotli compression: `fastest`, `balanced`, `smallest`, or `store`.
+- Supports Brotli, zlib, LZMA, aPLib, and uncompressed package modes.
 - Supports install components with required/default selection.
 - Creates platform-aware shortcuts for Windows, Linux, and macOS.
 - Lets interactive users choose desktop, Start Menu/applications menu, and install-folder shortcut tasks.
@@ -26,7 +26,7 @@
 - Verifies every extracted file with SHA-256 and blocks unsafe package paths.
 - Provides installer wizard theming for header, accent, progress color, banner style, splash, and sidebar/window settings.
 - Provides a small installer window designer for setup title, subtitle, intro text, footer text, size, style, and sidebar preview.
-- Has no third-party runtime dependencies.
+- Uses managed C# compression libraries that are bundled into published stubs.
 
 ## Quick Start
 
@@ -87,7 +87,7 @@ new-project [amsetup.project.json]
 analyze --payload <dir> [--manifest amsetup.json] [--output report.json] [--write-manifest]
 build-project --project amsetup.project.json [--allow-framework-dependent-stub]
 builder [--project amsetup.project.json] [--port 41873] [--no-browser]
-pack --manifest amsetup.json --payload <dir> --output <installer> [--stub <exe>] [--compression fastest|balanced|smallest|store] [--layout embedded|external|split] [--chunk-size 512m]
+pack --manifest amsetup.json --payload <dir> --output <installer> [--stub <exe>] [--compression fastest|balanced|smallest|store|zlibfastest|zlibbalanced|zlibsmallest|lzma|aplib] [--layout embedded|external|split] [--chunk-size 512m]
 install [--target <dir>] [--components a,b] [--silent] [--dry-run] [--list] [--console]
 uninstall --target <dir> [--silent] [--dry-run]
 inspect
@@ -103,6 +103,7 @@ The UI supports:
 - local Browse buttons for payload folders, stub executables, icons, and splash images
 - payload executable discovery for choosing the shortcut target
 - payload, output, stub, compression, layout, and split chunk settings
+- clean Exit Builder action for shutting down the local web host
 - installer look preview before building
 - installer window designer for title, subtitle, intro text, footer text, style, dimensions, and sidebar preview
 - normal product fields without editing JSON first

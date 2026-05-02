@@ -141,6 +141,8 @@ internal static class Program
             Run(installer, $"install --target \"{install}\" --components main --silent");
             Run(installer, "inspect");
             Run(installer, "install --list");
+            foreach (string mode in new[] { "zlibfastest", "zlibbalanced", "zlibsmallest", "lzma", "aplib", "store" })
+                ValidateCompressionMode(tool, manifest, payload, root, mode);
 
             string report = Path.Combine(root, "dependency-report.json");
             Run(tool, $"analyze --payload \"{payload}\" --manifest \"{manifest}\" --output \"{report}\"");
@@ -219,6 +221,8 @@ internal static class Program
             if (!html.Contains("amSetup Builder", StringComparison.Ordinal))
                 throw new InvalidOperationException("Builder UI HTML did not load.");
             if (!html.Contains("Preview", StringComparison.Ordinal) ||
+                !html.Contains("Exit Builder", StringComparison.Ordinal) ||
+                !html.Contains("shutdownBuilder", StringComparison.Ordinal) ||
                 !html.Contains("Window Designer", StringComparison.Ordinal) ||
                 !html.Contains("Prerequisites", StringComparison.Ordinal) ||
                 !html.Contains("Theme preset", StringComparison.Ordinal) ||
@@ -227,6 +231,8 @@ internal static class Program
                 !html.Contains("setupClient", StringComparison.Ordinal) ||
                 !html.Contains("previewPage", StringComparison.Ordinal) ||
                 !html.Contains("resolveRuntimePalette", StringComparison.Ordinal) ||
+                !html.Contains("ZLib Balanced", StringComparison.Ordinal) ||
+                !html.Contains("aPLib", StringComparison.Ordinal) ||
                 !html.Contains("Browse", StringComparison.Ordinal))
                 throw new InvalidOperationException("Builder UI is missing guided runtime preview/theme/folder/browse/registry controls.");
 
@@ -244,6 +250,9 @@ internal static class Program
             string files = RetryGet(client, baseUrl + "/api/payload-files?project=" + Uri.EscapeDataString(project) + "&payload=" + Uri.EscapeDataString(payload));
             if (!files.Contains("bin/run.sh", StringComparison.Ordinal))
                 throw new InvalidOperationException("Builder payload file endpoint did not return payload executables.");
+
+            Post(client, baseUrl + "/api/shutdown");
+            AssertExited(process, "Builder UI did not stop after /api/shutdown.");
         }
         finally
         {
@@ -273,11 +282,27 @@ internal static class Program
                 throw new InvalidOperationException("No-argument builder UI did not load.");
             if (!File.Exists(project))
                 throw new InvalidOperationException("No-argument builder launch did not create a project file.");
+
+            Post(client, $"http://127.0.0.1:{port}/api/shutdown");
+            AssertExited(process, "No-argument builder UI did not stop after /api/shutdown.");
         }
         finally
         {
             if (!process.HasExited) process.Kill(entireProcessTree: true);
         }
+    }
+
+    private static void ValidateCompressionMode(string tool, string manifest, string payload, string root, string mode)
+    {
+        string safeMode = mode.Replace("-", "", StringComparison.OrdinalIgnoreCase);
+        string installer = Path.Combine(root, OperatingSystem.IsWindows() ? $"compression-{safeMode}.exe" : $"compression-{safeMode}");
+        string install = Path.Combine(root, "install-" + safeMode);
+        Run(tool, $"pack --manifest \"{manifest}\" --payload \"{payload}\" --output \"{installer}\" --stub \"{tool}\" --compression {mode} --layout external --allow-framework-dependent-stub");
+        CopyFrameworkSidecars(tool, installer);
+        Run(installer, "inspect");
+        Run(installer, $"install --target \"{install}\" --components main --silent");
+        AssertFile(Path.Combine(install, "app.txt"), "hello from amSetup");
+        Run(installer, $"uninstall --target \"{install}\" --silent");
     }
 
     private static string RetryGet(HttpClient client, string url)
@@ -299,6 +324,19 @@ internal static class Program
         throw new InvalidOperationException("HTTP smoke request failed: " + url, last);
     }
 
+    private static void Post(HttpClient client, string url)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+        using var response = client.Send(request);
+        response.EnsureSuccessStatusCode();
+    }
+
+    private static void AssertExited(Process process, string message)
+    {
+        if (!process.WaitForExit(5000))
+            throw new InvalidOperationException(message);
+    }
+
     private static int GetFreePort()
     {
         var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -312,10 +350,14 @@ internal static class Program
     {
         string sourceDir = Path.GetDirectoryName(Path.GetFullPath(tool))!;
         string targetDir = Path.GetDirectoryName(Path.GetFullPath(installer))!;
-        foreach (string file in Directory.EnumerateFiles(sourceDir, "amSetup.*"))
+        foreach (string file in Directory.EnumerateFiles(sourceDir))
         {
             string name = Path.GetFileName(file);
             if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) &&
+                !name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
+                !name.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase))
+                continue;
             File.Copy(file, Path.Combine(targetDir, name), overwrite: true);
         }
     }

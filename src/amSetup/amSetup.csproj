@@ -18,4 +18,9 @@
     <EmbeddedResource Include="..\..\assets\amsetup-oldschool-icon-256.png" Link="assets\amsetup-oldschool-icon-256.png" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="AuroraLib.Compression" Version="2.0.0" />
+    <PackageReference Include="SharpCompress" Version="0.47.4" />
+  </ItemGroup>
+
 </Project>

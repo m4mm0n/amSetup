@@ -115,6 +115,11 @@ Compression modes:
 - `fastest`: Brotli fastest, best when package creation speed matters.
 - `balanced`: Brotli optimal, default ratio/speed tradeoff.
 - `smallest`: Brotli smallest size, slower but tighter.
+- `zlibfastest`: zlib fastest.
+- `zlibbalanced`: zlib default ratio/speed tradeoff.
+- `zlibsmallest`: zlib smallest size.
+- `lzma`: LZMA compression for tighter packages.
+- `aplib`: aPLib compression.
 - `store`: no compression.
 
 ## Runtime Examples

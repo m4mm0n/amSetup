@@ -9,9 +9,9 @@
     <PackageProjectUrl>https://github.com/m4mm0n/amSetup</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>installer;setup;self-extracting;dotnet;windows;linux;macos</PackageTags>
-    <Version>0.2.3</Version>
-    <AssemblyVersion>0.2.3.0</AssemblyVersion>
-    <FileVersion>0.2.3.0</FileVersion>
-    <InformationalVersion>0.2.3.0</InformationalVersion>
+    <Version>0.2.4</Version>
+    <AssemblyVersion>0.2.4.0</AssemblyVersion>
+    <FileVersion>0.2.4.0</FileVersion>
+    <InformationalVersion>0.2.4.0</InformationalVersion>
   </PropertyGroup>
 </Project>
