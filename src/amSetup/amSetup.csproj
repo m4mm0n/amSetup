@@ -19,8 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="AuroraLib.Compression" Version="2.0.0" />
-    <PackageReference Include="SharpCompress" Version="0.47.4" />
+    <ProjectReference Include="..\amSetup.Compression\amSetup.Compression.csproj" />
   </ItemGroup>
 
 </Project>

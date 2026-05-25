@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) ZLS
+//
+// amSetup
+// Installer builder, package writer, package reader, installer runtime, and
+// builder UI entry point. Compression is delegated to the first-party
+// AmSetup.Compression assembly.
 
+using AmSetup.Compression;
 using System.Buffers.Binary;
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -11,9 +17,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using AuroraLib.Compression;
-using AuroraLib.Compression.Formats.Common;
-using SharpCompress.Compressors.LZMA;
 
 namespace AmSetup;
 
@@ -182,7 +185,7 @@ internal static class Program
         Console.WriteLine("  analyze --payload <dir> [--manifest amsetup.json] [--output report.json] [--write-manifest]");
         Console.WriteLine("  build-project --project amsetup.project.json [--allow-framework-dependent-stub]");
         Console.WriteLine("  builder [--project amsetup.project.json] [--port 41873] [--no-browser]");
-        Console.WriteLine("  pack --manifest amsetup.json --payload <dir> --output <installer> [--stub <exe>] [--compression fastest|balanced|smallest|store|zlibfastest|zlibbalanced|zlibsmallest|lzma|aplib] [--layout embedded|external|split] [--chunk-size 512m]");
+        Console.WriteLine("  pack --manifest amsetup.json --payload <dir> --output <installer> [--stub <exe>] [--compression fastest|balanced|smallest|store|zlibfastest|zlibbalanced|zlibsmallest|lzma|lzma2|lz4hc|aplib|deflate|gzip|xz] [--layout embedded|external|split] [--chunk-size 512m]");
         Console.WriteLine("  install [--target <dir>] [--components a,b] [--silent] [--dry-run] [--list] [--console]");
         Console.WriteLine("  uninstall --target <dir> [--silent] [--dry-run]");
         Console.WriteLine("  inspect");
@@ -217,7 +220,12 @@ internal enum CompressionModeName
     ZLibBalanced = 11,
     ZLibSmallest = 12,
     Lzma = 20,
-    Aplib = 30
+    Lzma2 = 21,
+    Lz4Hc = 22,
+    Aplib = 30,
+    Deflate = 40,
+    GZip = 41,
+    Xz = 42
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<PackageLayout>))]
@@ -630,35 +638,8 @@ internal static class PackageStore
             return output.ToArray();
         }
 
-        if (IsBrotliMode(mode))
-        {
-            using (var brotli = new BrotliStream(output, CompressionLevelFor(mode), leaveOpen: true))
-                brotli.Write(raw);
-            return output.ToArray();
-        }
-
-        switch (mode)
-        {
-            case CompressionModeName.ZLibFastest:
-            case CompressionModeName.ZLibBalanced:
-            case CompressionModeName.ZLibSmallest:
-                using (var zlib = new ZLibStream(output, CompressionLevelFor(mode), leaveOpen: true))
-                    zlib.Write(raw);
-                break;
-            case CompressionModeName.Lzma:
-                using (var lzip = new LZipStream(output, SharpCompress.Compressors.CompressionMode.Compress, leaveOpen: true))
-                {
-                    lzip.Write(raw, 0, raw.Length);
-                    lzip.Finish();
-                }
-                break;
-            case CompressionModeName.Aplib:
-                new aPLib().Compress(raw, output, AuroraSettings(mode));
-                break;
-            default:
-                throw new InvalidDataException("Unknown amSetup compression mode.");
-        }
-
+        byte[] compressed = CodecRegistry.Compress(raw, new CompressionOptions(ToOwnedCodec(mode), CompressionLevelFor(mode), DictionarySizeFor(mode)));
+        output.Write(compressed);
         return output.ToArray();
     }
 
@@ -673,60 +654,44 @@ internal static class PackageStore
         }
         if (!Enum.IsDefined(mode)) throw new InvalidDataException("Unknown amSetup compression mode.");
 
-        using var input = new MemoryStream(data, 1, data.Length - 1);
-        using var output = new MemoryStream();
-        if (IsBrotliMode(mode))
-        {
-            using var brotli = new BrotliStream(input, System.IO.Compression.CompressionMode.Decompress);
-            CopyDecompressed(brotli, output, input, progress);
-            return (output.ToArray(), mode);
-        }
-
-        switch (mode)
-        {
-            case CompressionModeName.ZLibFastest:
-            case CompressionModeName.ZLibBalanced:
-            case CompressionModeName.ZLibSmallest:
-                using (var zlib = new ZLibStream(input, System.IO.Compression.CompressionMode.Decompress))
-                    CopyDecompressed(zlib, output, input, progress);
-                break;
-            case CompressionModeName.Lzma:
-                using (var lzip = new LZipStream(input, SharpCompress.Compressors.CompressionMode.Decompress))
-                    CopyDecompressed(lzip, output, input, progress);
-                break;
-            case CompressionModeName.Aplib:
-                new aPLib().Decompress(input, output);
-                progress?.Invoke(new PackageLoadProgress("Unpacking package to memory", input.Length, input.Length));
-                break;
-            default:
-                throw new InvalidDataException("Unknown amSetup compression mode.");
-        }
-
-        return (output.ToArray(), mode);
+        byte[] raw = CodecRegistry.Decompress(data.AsSpan(1), ToOwnedCodec(mode));
+        progress?.Invoke(new PackageLoadProgress("Unpacking package to memory", data.Length, data.Length));
+        return (raw, mode);
     }
 
-    private static bool IsBrotliMode(CompressionModeName mode) =>
-        mode is CompressionModeName.Fastest or CompressionModeName.Balanced or CompressionModeName.Smallest;
-
-    private static CompressionLevel CompressionLevelFor(CompressionModeName mode) => mode switch
+    private static int CompressionLevelFor(CompressionModeName mode) => mode switch
     {
-        CompressionModeName.Fastest or CompressionModeName.ZLibFastest => CompressionLevel.Fastest,
-        CompressionModeName.Smallest or CompressionModeName.ZLibSmallest => CompressionLevel.SmallestSize,
-        _ => CompressionLevel.Optimal
+        CompressionModeName.Fastest or CompressionModeName.ZLibFastest => 1,
+        CompressionModeName.Smallest or CompressionModeName.ZLibSmallest or CompressionModeName.Lzma or CompressionModeName.Lzma2 or CompressionModeName.Xz => 9,
+        CompressionModeName.Lz4Hc => 8,
+        _ => 5
     };
 
-    private static CompressionSettings AuroraSettings(CompressionModeName mode) => CompressionLevelFor(mode);
-
-    private static void CopyDecompressed(Stream source, MemoryStream output, Stream progressStream, Action<PackageLoadProgress>? progress)
+    private static int DictionarySizeFor(CompressionModeName mode) => mode switch
     {
-        byte[] buffer = new byte[1024 * 1024];
-        int read;
-        while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
-        {
-            output.Write(buffer, 0, read);
-            progress?.Invoke(new PackageLoadProgress("Unpacking package to memory", progressStream.Position, progressStream.Length));
-        }
-    }
+        CompressionModeName.Lzma or CompressionModeName.Lzma2 or CompressionModeName.Xz => 8 * 1024 * 1024,
+        CompressionModeName.Lz4Hc => 64 * 1024,
+        _ => 1024 * 1024
+    };
+
+    private static OwnedCompressionCodec ToOwnedCodec(CompressionModeName mode) => mode switch
+    {
+        CompressionModeName.Store => OwnedCompressionCodec.Store,
+        CompressionModeName.Fastest => OwnedCompressionCodec.BrotliFastest,
+        CompressionModeName.Balanced => OwnedCompressionCodec.BrotliBalanced,
+        CompressionModeName.Smallest => OwnedCompressionCodec.BrotliSmallest,
+        CompressionModeName.ZLibFastest => OwnedCompressionCodec.ZLibFastest,
+        CompressionModeName.ZLibBalanced => OwnedCompressionCodec.ZLibBalanced,
+        CompressionModeName.ZLibSmallest => OwnedCompressionCodec.ZLibSmallest,
+        CompressionModeName.Lzma => OwnedCompressionCodec.Lzma,
+        CompressionModeName.Lzma2 => OwnedCompressionCodec.Lzma2,
+        CompressionModeName.Lz4Hc => OwnedCompressionCodec.Lz4Hc,
+        CompressionModeName.Aplib => OwnedCompressionCodec.Aplib,
+        CompressionModeName.Deflate => OwnedCompressionCodec.Deflate,
+        CompressionModeName.GZip => OwnedCompressionCodec.GZip,
+        CompressionModeName.Xz => OwnedCompressionCodec.Xz,
+        _ => throw new InvalidDataException("Unknown amSetup compression mode.")
+    };
 
     private static void WriteInt32(Stream stream, int value)
     {
@@ -1318,7 +1283,7 @@ internal static class Installer
             try
             {
                 File.Copy(processPath, uninstallerPath, overwrite: true);
-                CopyUninstallerSidecars(processPath, meta);
+                CopyUninstallerSidecars(processPath, meta, artifacts);
                 if (!OperatingSystem.IsWindows()) TrySetExecutable(uninstallerPath);
                 artifacts.Add(new InstalledArtifact("uninstaller", uninstallerPath));
             }
@@ -1349,14 +1314,16 @@ internal static class Installer
         }
     }
 
-    private static void CopyUninstallerSidecars(string processPath, string meta)
+    private static void CopyUninstallerSidecars(string processPath, string meta, List<InstalledArtifact> artifacts)
     {
         string directory = Path.GetDirectoryName(Path.GetFullPath(processPath)) ?? ".";
         foreach (string sidecar in Directory.EnumerateFiles(directory, "amSetup.*"))
         {
             string name = Path.GetFileName(sidecar);
             if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
-            File.Copy(sidecar, Path.Combine(meta, name), overwrite: true);
+            string output = Path.Combine(meta, name);
+            File.Copy(sidecar, output, overwrite: true);
+            artifacts.Add(new InstalledArtifact("uninstaller", output));
         }
     }
 

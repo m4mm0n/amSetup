@@ -1,5 +1,15 @@
 # Releases
 
+## 0.2.5.0
+
+Package compression now uses the first-party `AmSetup.Compression` C# assembly.
+The package path has no SevenZip, native codec DLL, SharpCompress, AuroraLib, or
+BCL compression-stream dependency. The builder UI exposes Brotli, zlib, LZ4HC,
+LZMA, LZMA2, aPLib, DEFLATE, GZip, XZ, and store modes, and validation
+round-trips each mode through pack, inspect, install, and uninstall. Uninstall
+cleanup also removes copied framework-dependent sidecars and temporary splash
+files.
+
 ## 0.2.4.0
 
 This release fixes the builder web host lifecycle and expands package

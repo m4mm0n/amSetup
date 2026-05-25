@@ -1,7 +1,12 @@
-using System.Runtime.InteropServices;
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) ZLS
+//
+// amSetup
+// Package-time branding asset normalization for icons and splash images.
 
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace AmSetup;
 
@@ -86,14 +91,15 @@ internal static class InstallerSplash
         var branding = manifest.Branding;
         if (!branding.ShowSplash || string.IsNullOrWhiteSpace(branding.SplashImageBase64)) return;
 
+        string tempDirectory = Path.Combine(Path.GetTempPath(), "amsetup-splash-" + Guid.NewGuid().ToString("N"));
         string extension = branding.SplashContentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ? ".jpg" : ".png";
-        string path = Path.Combine(Path.GetTempPath(), "amsetup-splash-" + Guid.NewGuid().ToString("N") + extension);
+        string path = Path.Combine(tempDirectory, "splash" + extension);
         try
         {
+            Directory.CreateDirectory(tempDirectory);
             File.WriteAllBytes(path, Convert.FromBase64String(branding.SplashImageBase64));
             Console.WriteLine();
             Console.WriteLine($"Launching {manifest.ProductName} setup...");
-            Console.WriteLine($"Splash: {path}");
 
             Open(path);
             int delay = Math.Clamp(branding.SplashDurationMilliseconds, 250, 10000);
@@ -103,6 +109,10 @@ internal static class InstallerSplash
         {
             Console.WriteLine($"Launching {manifest.ProductName} setup...");
             Thread.Sleep(Math.Clamp(branding.SplashDurationMilliseconds, 250, 3000));
+        }
+        finally
+        {
+            TempCleanup.DeleteDirectorySoon(tempDirectory);
         }
     }
 
@@ -116,6 +126,73 @@ internal static class InstallerSplash
                 System.Diagnostics.Process.Start("open", path);
             else
                 System.Diagnostics.Process.Start("xdg-open", path);
+        }
+        catch
+        {
+        }
+    }
+}
+
+internal static class TempCleanup
+{
+    public static void DeleteDirectorySoon(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return;
+
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+            return;
+        }
+        catch
+        {
+        }
+
+        if (OperatingSystem.IsWindows()) ScheduleWindowsDelete(directory);
+        else ScheduleUnixDelete(directory);
+    }
+
+    private static void ScheduleWindowsDelete(string directory)
+    {
+        string script = Path.Combine(Path.GetTempPath(), "amsetup-temp-cleanup-" + Guid.NewGuid().ToString("N") + ".cmd");
+        File.WriteAllText(script, $"""
+            @echo off
+            timeout /t 3 /nobreak >nul
+            rmdir /s /q "{Path.GetFullPath(directory)}" 2>nul
+            del /f /q "%~f0" 2>nul
+            """, Encoding.UTF8);
+        StartHidden("cmd.exe", "/c \"" + script + "\"");
+    }
+
+    private static void ScheduleUnixDelete(string directory)
+    {
+        string script = Path.Combine(Path.GetTempPath(), "amsetup-temp-cleanup-" + Guid.NewGuid().ToString("N") + ".sh");
+        File.WriteAllText(script, $"""
+            #!/usr/bin/env sh
+            sleep 3
+            rm -rf "{Path.GetFullPath(directory)}"
+            rm -f "$0"
+            """, Encoding.UTF8);
+        try
+        {
+            using var chmod = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("chmod", $"+x \"{script}\"") { UseShellExecute = false });
+            chmod?.WaitForExit();
+        }
+        catch
+        {
+        }
+        StartHidden("/usr/bin/env", $"sh \"{script}\"");
+    }
+
+    private static void StartHidden(string fileName, string arguments)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(fileName, arguments)
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false
+            });
         }
         catch
         {

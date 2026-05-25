@@ -112,15 +112,22 @@ Split package archives:
 
 Compression modes:
 
-- `fastest`: Brotli fastest, best when package creation speed matters.
-- `balanced`: Brotli optimal, default ratio/speed tradeoff.
-- `smallest`: Brotli smallest size, slower but tighter.
-- `zlibfastest`: zlib fastest.
-- `zlibbalanced`: zlib default ratio/speed tradeoff.
-- `zlibsmallest`: zlib smallest size.
-- `lzma`: LZMA compression for tighter packages.
-- `aplib`: aPLib compression.
+- `fastest`: owned Brotli-mode fastest, best when package creation speed matters.
+- `balanced`: owned Brotli-mode default ratio/speed tradeoff.
+- `smallest`: owned Brotli-mode smallest size, slower but tighter.
+- `zlibfastest`: owned zlib-mode fastest.
+- `zlibbalanced`: owned zlib-mode default ratio/speed tradeoff.
+- `zlibsmallest`: owned zlib-mode smallest size.
+- `lz4hc`: owned LZ4HC block compression.
+- `lzma`: owned LZMA-mode compression for tighter packages.
+- `lzma2`: owned LZMA2-mode compression.
+- `aplib`: owned aPLib-mode compression.
+- `deflate`: owned DEFLATE-mode compression.
+- `gzip`: owned GZip-mode compression.
+- `xz`: owned XZ-mode compression.
 - `store`: no compression.
+
+All package compression code lives in `AmSetup.Compression.dll` and is written in C# in this repository. Production stubs do not use SevenZip, native codec DLLs, SharpCompress, AuroraLib, or BCL compression streams for package compression.
 
 ## Runtime Examples
 

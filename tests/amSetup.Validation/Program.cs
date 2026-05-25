@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) ZLS
+//
+// amSetup.Validation
+// End-to-end validation harness for package creation, inspection,
+// installation, uninstallation, builder UI smoke tests, and compression modes.
 
 using System.Diagnostics;
 using System.Text;
@@ -10,6 +15,7 @@ internal static class Program
 {
     public static int Main(string[] args)
     {
+        string? root = null;
         try
         {
             string tool = args.Length > 0
@@ -17,7 +23,7 @@ internal static class Program
                 : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "amSetup", "bin", "Release", "net10.0", OperatingSystem.IsWindows() ? "amSetup.exe" : "amSetup"));
             if (!File.Exists(tool)) throw new FileNotFoundException("amSetup executable was not found. Build Release first or pass path.", tool);
 
-            string root = Path.Combine(Path.GetTempPath(), "amsetup-validation-" + Guid.NewGuid().ToString("N"));
+            root = Path.Combine(Path.GetTempPath(), "amsetup-validation-" + Guid.NewGuid().ToString("N"));
             string payload = Path.Combine(root, "payload");
             string install = Path.Combine(root, "install");
             Directory.CreateDirectory(payload);
@@ -141,7 +147,7 @@ internal static class Program
             Run(installer, $"install --target \"{install}\" --components main --silent");
             Run(installer, "inspect");
             Run(installer, "install --list");
-            foreach (string mode in new[] { "zlibfastest", "zlibbalanced", "zlibsmallest", "lzma", "aplib", "store" })
+            foreach (string mode in new[] { "fastest", "balanced", "smallest", "zlibfastest", "zlibbalanced", "zlibsmallest", "lz4hc", "lzma", "lzma2", "aplib", "deflate", "gzip", "xz", "store" })
                 ValidateCompressionMode(tool, manifest, payload, root, mode);
 
             string report = Path.Combine(root, "dependency-report.json");
@@ -166,7 +172,10 @@ internal static class Program
             }) + Environment.NewLine, Encoding.UTF8);
             Run(tool, $"build-project --project \"{project}\" --allow-framework-dependent-stub");
             CopyFrameworkSidecars(tool, projectInstaller);
-            Run(projectInstaller, $"install --target \"{Path.Combine(root, "project-install")}\" --silent");
+            string projectInstall = Path.Combine(root, "project-install");
+            Run(projectInstaller, $"install --target \"{projectInstall}\" --silent");
+            Run(projectInstaller, $"uninstall --target \"{projectInstall}\" --silent");
+            AssertRemoved(projectInstall, "project install target");
             SmokeBuilderUi(tool, project);
             SmokeDoubleClickBuilder(tool, Path.Combine(root, "double-click", "amsetup.project.json"));
 
@@ -190,8 +199,7 @@ internal static class Program
                 throw new InvalidOperationException("Uninstaller was not created.");
 
             Run(installer, $"uninstall --target \"{install}\" --silent");
-            if (File.Exists(Path.Combine(install, "app.txt")) || File.Exists(Path.Combine(install, ".amsetup", "install.json")))
-                throw new InvalidOperationException("Uninstall did not remove installed files and receipt.");
+            AssertRemoved(install, "primary install target");
 
             Console.WriteLine("amSetup validation passed.");
             return 0;
@@ -200,6 +208,10 @@ internal static class Program
         {
             Console.Error.WriteLine(ex);
             return 1;
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
         }
     }
 
@@ -303,6 +315,25 @@ internal static class Program
         Run(installer, $"install --target \"{install}\" --components main --silent");
         AssertFile(Path.Combine(install, "app.txt"), "hello from amSetup");
         Run(installer, $"uninstall --target \"{install}\" --silent");
+        AssertRemoved(install, mode + " install target");
+    }
+
+    private static void AssertRemoved(string path, string name)
+    {
+        if (File.Exists(path) || Directory.Exists(path))
+            throw new InvalidOperationException($"Uninstall did not remove the {name}: {path}");
+    }
+
+    private static void TryDeleteDirectory(string? path)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+        }
     }
 
     private static string RetryGet(HttpClient client, string url)

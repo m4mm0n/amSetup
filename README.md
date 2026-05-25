@@ -15,7 +15,7 @@
 - Includes an oldschool default setup icon and manifest-controlled custom setup icon/splash branding.
 - Supports selected install folders, interactive confirmation, silent install, dry-run, package inspection, and file listing.
 - Supports embedded self-extracting installers, adjacent package archives, or split package archives.
-- Supports Brotli, zlib, LZMA, aPLib, and uncompressed package modes.
+- Supports owned C# package modes for Brotli, zlib, LZ4HC, LZMA, LZMA2, aPLib, DEFLATE, GZip, XZ, and uncompressed storage.
 - Supports install components with required/default selection.
 - Creates platform-aware shortcuts for Windows, Linux, and macOS.
 - Lets interactive users choose desktop, Start Menu/applications menu, and install-folder shortcut tasks.
@@ -26,7 +26,7 @@
 - Verifies every extracted file with SHA-256 and blocks unsafe package paths.
 - Provides installer wizard theming for header, accent, progress color, banner style, splash, and sidebar/window settings.
 - Provides a small installer window designer for setup title, subtitle, intro text, footer text, size, style, and sidebar preview.
-- Uses managed C# compression libraries that are bundled into published stubs.
+- Uses the first-party `AmSetup.Compression.dll`; package compression has no SevenZip, native, SharpCompress, AuroraLib, or BCL compression-stream dependency.
 
 ## Quick Start
 
@@ -87,7 +87,7 @@ new-project [amsetup.project.json]
 analyze --payload <dir> [--manifest amsetup.json] [--output report.json] [--write-manifest]
 build-project --project amsetup.project.json [--allow-framework-dependent-stub]
 builder [--project amsetup.project.json] [--port 41873] [--no-browser]
-pack --manifest amsetup.json --payload <dir> --output <installer> [--stub <exe>] [--compression fastest|balanced|smallest|store|zlibfastest|zlibbalanced|zlibsmallest|lzma|aplib] [--layout embedded|external|split] [--chunk-size 512m]
+pack --manifest amsetup.json --payload <dir> --output <installer> [--stub <exe>] [--compression fastest|balanced|smallest|store|zlibfastest|zlibbalanced|zlibsmallest|lz4hc|lzma|lzma2|aplib|deflate|gzip|xz] [--layout embedded|external|split] [--chunk-size 512m]
 install [--target <dir>] [--components a,b] [--silent] [--dry-run] [--list] [--console]
 uninstall --target <dir> [--silent] [--dry-run]
 inspect

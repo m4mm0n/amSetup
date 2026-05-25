@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) ZLS
+//
+// amSetup
+// Windows-specific installer wizard surface.
 
 #if WINDOWS
 using System.Drawing;

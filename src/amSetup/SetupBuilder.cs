@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) ZLS
+//
+// amSetup
+// Local install-creator web UI, project file commands, and builder host.
 
 using System.Diagnostics;
 using System.Net;
@@ -365,7 +369,7 @@ details{background:#171d20;border:1px solid var(--line);border-radius:8px;paddin
 <aside>
 <div class="group"><h2>Build Flow</h2><div class="steps"><div class="step"><div class="num">1</div><div>Set product name and install folder.</div></div><div class="step"><div class="num">2</div><div>Point payload to your published app folder.</div></div><div class="step"><div class="num">3</div><div>Analyze dependencies, then build.</div></div></div></div>
 <div class="group"><h2>Project</h2><label>Project file</label><input id="projectFile"><label>Manifest</label><input id="manifestPath"><label>Payload folder</label><div class="pathrow"><input id="payloadPath"><button onclick="openPicker('payloadPath','folder')">Browse</button></div><label>Output installer</label><input id="outputPath"><label>Stub executable</label><div class="pathrow"><input id="stubPath" placeholder="empty = this amSetup executable"><button onclick="openPicker('stubPath','exe')">Browse</button></div></div>
-<div class="group"><h2>Package</h2><div class="grid"><div><label>Compression</label><select id="compression"><option value="Fastest">Brotli Fastest</option><option value="Balanced" selected>Brotli Balanced</option><option value="Smallest">Brotli Smallest</option><option value="ZLibFastest">ZLib Fastest</option><option value="ZLibBalanced">ZLib Balanced</option><option value="ZLibSmallest">ZLib Smallest</option><option value="Lzma">LZMA</option><option value="Aplib">aPLib</option><option value="Store">Store</option></select></div><div><label>Layout</label><select id="layout"><option>Embedded</option><option>External</option><option>Split</option></select></div></div><label>Chunk size</label><input id="chunkSize" value="512m"><label><input id="allowFramework" type="checkbox"> allow local dev stub</label></div>
+<div class="group"><h2>Package</h2><div class="grid"><div><label>Compression</label><select id="compression"><option value="Fastest">Brotli Fastest</option><option value="Balanced" selected>Brotli Balanced</option><option value="Smallest">Brotli Smallest</option><option value="ZLibFastest">ZLib Fastest</option><option value="ZLibBalanced">ZLib Balanced</option><option value="ZLibSmallest">ZLib Smallest</option><option value="Lz4Hc">LZ4HC</option><option value="Lzma">LZMA</option><option value="Lzma2">LZMA2</option><option value="Aplib">aPLib</option><option value="Deflate">DEFLATE</option><option value="GZip">GZip</option><option value="Xz">XZ</option><option value="Store">Store</option></select></div><div><label>Layout</label><select id="layout"><option>Embedded</option><option>External</option><option>Split</option></select></div></div><label>Chunk size</label><input id="chunkSize" value="512m"><label><input id="allowFramework" type="checkbox"> allow local dev stub</label></div>
 <div class="group"><h2>Status</h2><div id="status" class="status">Ready.</div></div>
 </aside>
 <section>

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.5.0 - 2026-05-25
+
+- Replaced package compression dependencies with the first-party
+  `AmSetup.Compression` C# assembly.
+- Added owned package modes for `lz4hc`, `lzma2`, `deflate`, `gzip`, and `xz`
+  alongside the existing Brotli, zlib, LZMA, aPLib, and store choices.
+- Updated the setup-builder package dropdown and validation harness so every
+  exposed compression mode round-trips through pack, inspect, install, and
+  uninstall.
+- Added source-file headers and XML summaries for the new compression assembly.
+- Removed internal planning notes from the repository.
+- Hardened uninstall cleanup so framework-dependent sidecars and temporary
+  splash files are removed.
+
 ## 0.2.4.0 - 2026-05-03
 
 - Added a clean builder shutdown path with an Exit Builder button and

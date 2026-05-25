@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) ZLS
+//
+// amSetup
+// Cross-platform installer UI dispatch and console fallback.
 
 namespace AmSetup;
 

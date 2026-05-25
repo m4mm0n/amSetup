@@ -1,5 +1,9 @@
 using System.Diagnostics;
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) ZLS
+//
+// amSetup
+// Payload dependency analysis and prerequisite suggestion logic.
 
 using System.Text;
 using System.Text.Json;

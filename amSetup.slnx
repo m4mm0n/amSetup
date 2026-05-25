@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/amSetup/amSetup.csproj" />
+    <Project Path="src/amSetup.Compression/amSetup.Compression.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/amSetup.Validation/amSetup.Validation.csproj" />

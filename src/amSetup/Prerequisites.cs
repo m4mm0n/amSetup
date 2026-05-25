@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) ZLS
+//
+// amSetup
+// Runtime prerequisite detection and execution support.
 
 using System.Diagnostics;
 
